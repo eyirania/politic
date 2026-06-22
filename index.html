@@ -1502,7 +1502,8 @@ class Sim {
     const {votes, cast}=this._runLower();
     const T=C.lowerSeats;
     // 상원 임기가 하원과 같으면 동시선거(같은 표로 즉시 갱신)
-    if(C.senate!=='NONE' && this.con.senTerm===this.con.term){ this._runSenate(votes, cast); this.lastSenate=this.tick; }
+    if(C.senate!=='NONE' && this.con.senTerm===this.con.term){ this._runSenate(votes, cast); this.lastSenate=this.tick;
+      this.pushNews(1,'norm',`상원 동시 개선 — ${SENNAME[C.senate]}`); }
     if(this.electionFair<1) this.pushNews(3,'sev3','국제 감시단 "선거 공정성에 중대한 결함" 보고');
     // 통계
     let g2=0, hS=0;
@@ -1842,6 +1843,8 @@ class Sim {
     this.ensureKing();
     this.pushNews(3,'sev2',`<b>${P.label} 헌정 도입</b> — ${P.desc}`);
     this.chron(`헌정 개편: ${P.label}`);
+    if(this.con.senate!=='NONE'){ if(this.parties.some(p=>p.support>0.02))this.senateElection(); this.lastSenate=this.tick; }
+    else this.senate=[];
   }
 
   // ── 헌법 일괄 적용 (즉시) ──
@@ -1852,6 +1855,11 @@ class Sim {
     this.con.senSeats=Math.max(10,Math.min(300,this.con.senSeats|0));
     this.pushNews(3,'sev2',`<b>개헌</b> — 새 헌법 공포: ${METHODNAME[this.con.method]}, 하원 ${this.con.lowerSeats}석, 임기 ${this.con.term}년${this.con.senate!=='NONE'?', '+SENNAME[this.con.senate]+' 상원':''}`);
     this.chron(`개헌: ${METHODNAME[this.con.method]}/${this.con.lowerSeats}석${this.con.senate!=='NONE'?'/양원제':''}`);
+    // 상원이 있으면 즉시 1회 구성(개원), 없으면 비움
+    if(this.con.senate!=='NONE'){
+      if(this.parties.some(p=>p.support>0.02)){ this.senateElection(); }
+      this.lastSenate=this.tick;
+    } else { this.senate=[]; }
   }
 
   // ── 체제 강제 전환 (신의 손) ──
@@ -2103,8 +2111,9 @@ class Sim {
     // 상원 독립 선거 (임기가 하원과 다를 때만 따로 실시)
     if(this.con.senate!=='NONE' && this.con.senTerm!==this.con.term
        && this.regime!=='MIL' && this.parties.some(p=>p.support>0.04)){
-      if(this.lastSenate<-900) this.lastSenate=this.tick;   // 첫 기준점
-      else if(this.tick-this.lastSenate>=this.senInterval){ this.lastSenate=this.tick; this.senateElection(); }
+      if(this.lastSenate<-900 || this.tick-this.lastSenate>=this.senInterval){
+        this.lastSenate=this.tick; this.senateElection();
+      }
     }
     this.record();
   }
@@ -2244,10 +2253,7 @@ const UI={
       const ed=e.target.closest('[data-edit]');
       if(ed){ this.openPedit(+ed.dataset.edit); return; }
       const b=e.target.closest('.banBtn[data-ban]'); if(!b)return;
-      if(!b.classList.contains('arm')){
-        b.classList.add('arm'); b.textContent='확인';
-        setTimeout(()=>{ b.classList.remove('arm'); b.textContent='✕'; },2200);
-      } else { this.sim.banParty(+b.dataset.ban); this.render(true); }
+      this.sim.banParty(+b.dataset.ban); this.render(true);
     };
     $('#peClose').onclick=()=>{ $('#peditPage').classList.remove('show'); this.paused=this._pePrev; };
     $('#peApply').onclick=()=>{
@@ -2423,16 +2429,29 @@ const UI={
       this.render(true);
     });
     $('#btnSave').onclick=()=>{
-      const blob=new Blob([this.sim.serialize()],{type:'application/json'});
-      const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
-      a.download=`polis_y${this.sim.year()}.json`; a.click(); URL.revokeObjectURL(a.href);
+      try{
+        const json=this.sim.serialize();
+        const sz=(json.length/1024).toFixed(0);
+        const safe=(this.sim.country||'polis').replace(/[^\w가-힣-]/g,'_').slice(0,20);
+        const stamp=new Date().toISOString().slice(0,10);
+        const blob=new Blob([json],{type:'application/json'});
+        const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+        a.download=`POLIS_${safe}_${this.sim.year()}년_${stamp}.json`;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+        this.sim.pushNews(2,'pos',`<b>백업 저장</b> — ${a.download} (${sz}KB) 다운로드`); this._newsDirty=true;
+      }catch(err){ alert('백업 실패: '+err.message); }
     };
     $('#btnLoad').onclick=()=>$('#fileIn').click();
     $('#fileIn').onchange=e=>{
       const f=e.target.files[0]; if(!f)return;
       const r=new FileReader();
-      r.onload=()=>{ try{ this.sim=Sim.deserialize(r.result); this._newsDirty=true; this.render(true);
-        }catch(err){ alert('불러오기 실패: '+err.message); } };
+      r.onload=()=>{ try{
+          const ns=Sim.deserialize(r.result);
+          this.sim=ns; this._parlKey=''; this._newsDirty=true; this.paused=true;
+          this.sim.pushNews(2,'pos',`<b>백업 불러오기 완료</b> — ${this.sim.country}, ${this.sim.year()}년`);
+          this.render(true);
+        }catch(err){ alert('불러오기 실패: 파일이 손상됐거나 형식이 맞지 않습니다.\n('+err.message+')'); } };
       r.readAsText(f); e.target.value='';
     };
   },
