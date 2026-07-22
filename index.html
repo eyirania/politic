@@ -149,6 +149,7 @@ header{
   background:rgba(120,160,255,0.05);border:1px solid rgba(130,170,255,0.18);color:var(--tx2)}
 .cOpt.on{color:var(--cy);border-color:rgba(84,224,255,0.55);background:rgba(84,224,255,0.09)}
 .cChk{display:flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;color:var(--tx2)}
+.facTgl{margin-left:7px;font-size:9.5px;color:var(--tx3);letter-spacing:0}
 .chipBar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
 .chipBar .lbl{font-size:10.5px;color:var(--tx3);margin-right:2px}
 .tchip{font-size:11px;padding:4px 11px;border-radius:99px;cursor:pointer;border:1px solid var(--line);
@@ -355,6 +356,37 @@ canvas.chart.tall{height:210px}
 ::-webkit-scrollbar-thumb{background:rgba(120,190,255,0.18);border-radius:99px}
 ::-webkit-scrollbar-track{background:transparent}
 .muted{color:var(--tx3);font-size:11px;line-height:1.6}
+/* ═══════════ 반응형 (4단계) ═══════════ */
+/* 태블릿 (680~1100px): 뉴스 접힘은 980px 기존 규칙 유지 */
+@media(max-width:900px){
+  header{gap:8px;padding:8px 12px;flex-wrap:wrap}
+  #apprPill{display:none}
+  .speedGroup .spd{padding:6px 9px}
+}
+/* 모바일 (<680px): 단일 열 + 탭 가로 스크롤 + 컴팩트 헤더 */
+@media(max-width:680px){
+  .g2,.g3,.g4{grid-template-columns:1fr}
+  .kpis{grid-template-columns:repeat(2,1fr)}
+  #tabbar{overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;padding:8px 10px 0;gap:4px}
+  #tabbar::-webkit-scrollbar{display:none}
+  .tab{padding:7px 12px;font-size:11.5px;white-space:nowrap;flex-shrink:0}
+  #pages{padding:10px 10px 20px}
+  .panel{padding:11px 12px;border-radius:11px}
+  header{gap:6px;padding:7px 10px}
+  .logo{font-size:13.5px;letter-spacing:2px}
+  .logo small{display:none}
+  #dateBox{font-size:11.5px;padding:3px 8px}
+  #regimeBadge{display:none}
+  .btn{padding:6px 10px;font-size:11px}
+  .speedGroup{gap:2px}
+  .speedGroup .spd{padding:5px 7px;font-size:10px}
+  .chipBar{gap:4px}
+  .tchip{padding:3px 8px;font-size:10px}
+  .viewChip{padding:4px 10px;font-size:10.5px}
+  .panel h3{flex-wrap:wrap;row-gap:5px}
+  .facLabels{font-size:8.5px}
+  #gearMenu{position:fixed;right:8px;left:8px;top:52px;min-width:0}
+}
 </style>
 </head>
 <body>
@@ -372,27 +404,30 @@ canvas.chart.tall{height:210px}
       <button class="btn spd" data-s="12">12×</button>
       <button class="btn spd" data-s="40">40×</button>
     </div>
-    <label class="cChk" id="popTogWrap" style="font-size:10.5px;gap:5px;margin-right:4px" title="선거 시 상세 팝업 표시">
-  <span style="color:var(--tx3)">팝업</span>
-  <select id="popMode" style="font:inherit;font-size:10.5px;background:rgba(120,160,255,0.06);border:1px solid rgba(130,170,255,0.22);color:var(--tx);border-radius:6px;padding:2px 5px;outline:none">
-    <option value="both">전부</option><option value="lower" selected>하원만</option><option value="sen">상원만</option><option value="none">끄기</option>
-  </select>
-</label>
-<button class="btn" id="btnSave">⬇ 저장</button>
-    <button class="btn" id="btnLoad">⬆ 불러오기</button>
+    <div style="position:relative">
+      <button class="btn" id="btnGear" title="설정">⚙</button>
+      <div id="gearMenu" style="display:none;position:absolute;right:0;top:calc(100% + 6px);z-index:80;min-width:190px;padding:10px 12px;border-radius:12px;background:rgba(13,18,36,0.98);border:1px solid rgba(130,170,255,0.25);box-shadow:0 10px 40px rgba(0,0,0,0.5)">
+        <div style="font-size:10px;color:var(--tx3);letter-spacing:1px;margin-bottom:7px">저장</div>
+        <button class="btn" id="btnSave" style="width:100%;margin-bottom:5px;justify-content:flex-start">⬇ 저장 (JSON)</button>
+        <button class="btn" id="btnLoad" style="width:100%;margin-bottom:9px;justify-content:flex-start">⬆ 불러오기</button>
+        <div style="font-size:10px;color:var(--tx3);letter-spacing:1px;margin-bottom:5px">선거 상세 팝업</div>
+        <select id="popMode" style="width:100%;font:inherit;font-size:11px;background:rgba(120,160,255,0.06);border:1px solid rgba(130,170,255,0.22);color:var(--tx);border-radius:7px;padding:5px 7px;outline:none">
+          <option value="both">전부</option><option value="lower" selected>하원만</option><option value="sen">상원만</option><option value="none">끄기</option>
+        </select>
+      </div>
+    </div>
     <input type="file" id="fileIn" accept=".json" style="display:none">
   </header>
 
   <div id="main">
     <div id="content">
       <div id="tabbar">
-        <div class="tab active" data-p="dash">대시보드</div>
+        <div class="tab active" data-p="dash">개요</div>
         <div class="tab" data-p="pol">정치</div>
+        <div class="tab" data-p="map">연방</div>
         <div class="tab" data-p="soc">사회</div>
-        <div class="tab" data-p="map">지도</div>
-        <div class="tab" data-p="cit">민심 지도</div>
-        <div class="tab" data-p="hist">연대기</div>
-        <div class="tab" data-p="gov">통치 개입</div>
+        <div class="tab" data-p="hist">역사</div>
+        <div class="tab" data-p="gov">통치</div>
       </div>
       <div id="pages">
 
@@ -400,6 +435,8 @@ canvas.chart.tall{height:210px}
           <div class="panel" id="headlineCard" style="margin-bottom:14px;border-color:rgba(84,224,255,0.2)">
             <div id="headlineBody"></div></div>
           <div class="kpis" id="kpis"></div>
+          <div class="panel am" style="margin-bottom:14px"><h3>최근 주요 사건 <span style="margin-left:auto;font-size:10px;color:var(--tx3)">역사 탭에 전체 연대기</span></h3>
+            <div id="dashEvents"></div></div>
           <div class="grid g2">
             <div class="panel"><h3>GDP 지수</h3><canvas class="chart" id="chGdp"></canvas></div>
             <div class="panel mg"><h3>실업률 %</h3><canvas class="chart" id="chUnemp"></canvas></div>
@@ -489,21 +526,22 @@ canvas.chart.tall{height:210px}
             <h3>여론조사 <span id="pollD" style="margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--am)"></span></h3>
             <div id="pollBars"></div>
           </div>
-          <div class="panel" style="margin-top:14px"><h3>정당 지지율 추이</h3>
-            <canvas class="chart tall" id="chSupport"></canvas></div>
-          <div class="panel mg" style="margin-top:14px"><h3>지지 구성의 역사 — 민심의 지층 (누적 비율)</h3>
-            <canvas class="chart tall" id="chStack"></canvas></div>
-          <div class="panel mg" style="margin-top:14px"><h3>세대별 표심 — 누가 누구를 지지하나</h3>
-            <canvas class="chart" id="chGenSup" style="height:150px"></canvas></div>
-          <div class="grid g2" style="margin-top:14px">
-            <div class="panel"><h3>세대별 표심 — 누가 누구를 지지하는가</h3>
-              <canvas class="chart tall" id="chAgeSup"></canvas></div>
-            <div class="panel mg"><h3>학력·자산별 표심</h3>
-              <canvas class="chart tall" id="chClassSup"></canvas></div>
-            <div class="panel am"><h3>의석 변천사 — 역대 총선</h3>
-              <canvas class="chart tall" id="chSeats"></canvas></div>
-            <div class="panel lm"><h3>선거 동향 — 표심은 의석에 얼마나 닿았나</h3>
-              <canvas class="chart tall" id="chEstat"></canvas></div>
+          <div class="panel" style="margin-top:14px" id="analysisPanel">
+            <h3 id="analysisTitle">표심 분석 — 정당 지지율 추이</h3>
+            <div class="chipBar" style="margin-bottom:10px">
+              <button class="viewChip sel" data-anly="support">지지율 추이</button>
+              <button class="viewChip" data-anly="stack">지지 구성 역사</button>
+              <button class="viewChip" data-anly="age">세대별</button>
+              <button class="viewChip" data-anly="class">학력·자산별</button>
+              <button class="viewChip" data-anly="seats">의석 변천사</button>
+              <button class="viewChip" data-anly="estat">선거 동향</button>
+            </div>
+            <div data-av="support"><canvas class="chart tall" id="chSupport"></canvas></div>
+            <div data-av="stack" style="display:none"><canvas class="chart tall" id="chStack"></canvas></div>
+            <div data-av="age" style="display:none"><canvas class="chart tall" id="chAgeSup"></canvas></div>
+            <div data-av="class" style="display:none"><canvas class="chart tall" id="chClassSup"></canvas></div>
+            <div data-av="seats" style="display:none"><canvas class="chart tall" id="chSeats"></canvas></div>
+            <div data-av="estat" style="display:none"><canvas class="chart tall" id="chEstat"></canvas></div>
           </div>
         </div>
 
@@ -518,14 +556,53 @@ canvas.chart.tall{height:210px}
             <div class="panel lm"><h3>인구 구조 — 연령 분포</h3><canvas class="chart tall" id="chPyr"></canvas></div>
             <div class="panel mg"><h3>자산 분포 — 부는 어디에 쌓이는가</h3><canvas class="chart tall" id="chWealth"></canvas></div>
           </div>
+          <div style="margin-top:14px">
+          <div class="panel">
+            <h3>민심 지도 — 세력은 스스로 태어난다
+              <span class="chipBar" style="margin-left:auto;margin-bottom:0">
+                <button class="viewChip sel" data-axis="pca">갈등축 (자동)</button>
+                <button class="viewChip" data-axis="nolan">경제·사회 (Nolan)</button>
+              </span></h3>
+            <div id="scatterWrap">
+              <canvas id="scatterCv"></canvas>
+              <div class="axisLabel" id="axX" style="bottom:6px;right:10px"></div>
+              <div class="axisLabel" id="axY" style="top:6px;left:10px"></div>
+            </div>
+            <div class="muted" style="margin-top:8px">
+              점 하나가 시민 한 명이다. 비슷한 마음을 가진 사람들이 모여 구름을 이루고,
+              그 구름 위에서 정당이 태어나고 죽는다. 축은 지금 이 나라의 민심을 가장 크게 가르는 갈등이다.
+            </div>
+          </div>
+          </div>
         </div>
 
         <div class="page" id="page-map">
           <div class="panel">
-            <h3>지역별 정치 지형</h3>
+            <h3>지역별 정치 지형
+              <span class="chipBar" style="margin-left:auto;margin-bottom:0">
+                <button class="viewChip sel" data-map="support">정당 지지</button>
+                <button class="viewChip" data-map="gov">주지사</button>
+                <button class="viewChip" data-map="assem">지방의회</button>
+                <button class="viewChip" data-map="grievance">분리 압력</button>
+              </span></h3>
             <div id="mapWrap">
               <svg id="mapSvg" viewBox="0 0 460 330"></svg>
               <div id="mapLegend"></div>
+            </div>
+          </div>
+          <div class="panel" style="margin-bottom:14px">
+            <h3>지방정부 — 주지사 <label class="cChk" style="margin-left:auto;font-size:10px;gap:5px"><input type="checkbox" id="localGovTog">지방정부 켜기</label></h3>
+            <div class="muted" style="font-size:11px;margin-bottom:8px">각 주에서 최다 지지 정당이 주지사직을 차지한다. 중앙 집권당과 다른 정당이 지방을 장악하면 분할정부가 된다. 주지사는 대통령으로 가는 경력 사다리이기도 하다.</div>
+            <div id="govPanel"></div>
+            <div id="fedControls" style="margin-top:12px;border-top:1px solid rgba(130,170,255,0.1);padding-top:10px;display:none">
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;font-size:11.5px;color:var(--tx2)">
+                <span style="min-width:64px">연방 권한</span>
+                <input type="range" id="fedPowSl" min="0" max="100" step="5" style="flex:1;accent-color:var(--lm);height:3px">
+                <em id="fedPowV" style="font-style:normal;font-family:var(--mono);min-width:42px;text-align:right"></em>
+              </div>
+              <div class="cHint" style="margin-left:0;margin-top:-2px;margin-bottom:8px">0=중앙집권(지방은 형식적) · 100=강한 연방(지방이 중앙에 맞섬, 분리 위험↑)</div>
+              <label class="cChk" style="font-size:11px"><input type="checkbox" id="fiscalTog" checked>재정 이전 — 부유한 주가 가난한 주를 지원(균형발전). 부유주는 불만이 쌓인다</label>
+              <div id="fedStatus" style="margin-top:9px"></div>
             </div>
           </div>
           <div class="panel" style="margin-bottom:14px"><h3>지역주의 — 우리가 남이가</h3>
@@ -551,53 +628,46 @@ canvas.chart.tall{height:210px}
             <canvas class="chart tall" id="chRegSup"></canvas></div>
         </div>
 
-        <div class="page" id="page-cit">
-          <div class="panel">
-            <h3>민심 지도 — 세력은 스스로 태어난다
-              <span class="chipBar" style="margin-left:auto;margin-bottom:0">
-                <button class="viewChip sel" data-axis="pca">갈등축 (자동)</button>
-                <button class="viewChip" data-axis="nolan">경제·사회 (Nolan)</button>
-              </span></h3>
-            <div id="scatterWrap">
-              <canvas id="scatterCv"></canvas>
-              <div class="axisLabel" id="axX" style="bottom:6px;right:10px"></div>
-              <div class="axisLabel" id="axY" style="top:6px;left:10px"></div>
-            </div>
-            <div class="muted" style="margin-top:8px">
-              점 하나가 시민 한 명이다. 비슷한 마음을 가진 사람들이 모여 구름을 이루고,
-              그 구름 위에서 정당이 태어나고 죽는다. 축은 지금 이 나라의 민심을 가장 크게 가르는 갈등이다.
-            </div>
-          </div>
-        </div>
-
         <div class="page" id="page-hist">
-          <div class="panel" style="margin-bottom:14px"><h3>체제 변천 타임라인</h3>
-            <canvas id="chRegime" style="width:100%;height:74px;display:block"></canvas>
-            <div style="font-size:10px;color:var(--tx3);font-family:var(--mono);margin:6px 0 2px">정권 (집권 제1당)</div>
-            <canvas id="chGov" style="width:100%;height:26px;display:block"></canvas>
-            <div id="regLegend" style="display:flex;gap:14px;flex-wrap:wrap;margin-top:8px"></div>
+          <div class="chipBar" style="margin-bottom:12px">
+            <button class="viewChip sel" data-hview="events">사건</button>
+            <button class="viewChip" data-hview="people">인물</button>
+            <button class="viewChip" data-hview="parties">정당</button>
+            <button class="viewChip" data-hview="tools">도구</button>
           </div>
-          <div class="panel mg" style="margin-bottom:14px"><h3>정당의 역사 — 탄생과 소멸</h3>
-            <canvas id="chPLife" style="width:100%;height:170px;display:block"></canvas></div>
-          <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px">
-            <button class="btn primary" id="btnDocu">◆ 역사 다큐</button>
-            <button class="btn" id="btnSnap">⧖ 현재 시점 저장</button>
+          <div data-hv="events">
+            <div class="panel" style="margin-bottom:14px"><h3>체제 변천 타임라인</h3>
+              <canvas id="chRegime" style="width:100%;height:74px;display:block"></canvas>
+              <div style="font-size:10px;color:var(--tx3);font-family:var(--mono);margin:6px 0 2px">정권 (집권 제1당)</div>
+              <canvas id="chGov" style="width:100%;height:26px;display:block"></canvas>
+              <div id="regLegend" style="display:flex;gap:14px;flex-wrap:wrap;margin-top:8px"></div>
+            </div>
+            <div class="panel am"><h3>연대기 — 주요 사건</h3>
+              <div id="histList" class="partyList" style="max-height:560px"></div>
+            </div>
           </div>
-          <div class="grid g2" style="margin-bottom:14px">
-            <div class="panel"><h3>타임머신 — 갈림길로 돌아가기</h3>
-              <div class="muted" style="font-size:11px;margin-bottom:8px">20년마다 자동 저장. 복원하면 그 시점부터 역사가 다시 갈라진다.</div>
-              <div id="snapList"></div></div>
-            <div class="panel am"><h3>기록실 — 명예와 오욕의 전당</h3><div id="hallList"></div></div>
+          <div data-hv="people" style="display:none">
+            <div class="panel"><h3>인물 — 역대 정치인 <span style="margin-left:auto;font-size:10.5px;color:var(--tx3)">이름을 누르면 일대기</span></h3>
+              <div id="poliList"></div></div>
           </div>
-          <div class="panel mg" style="margin-bottom:14px"><h3>의석의 강 — 역대 총선 정당 의석 흐름</h3>
-            <canvas id="chStream" style="width:100%;display:block"></canvas>
-            <div class="muted" style="font-size:10.5px;margin-top:6px">각 띠가 정당. 두께 = 의석. 합당·분당·흥망이 강물처럼 흐른다.</div></div>
-          <div class="panel" style="margin-bottom:14px"><h3>인물 — 역대 정치인 <span style="margin-left:auto;font-size:10.5px;color:var(--tx3)">이름을 누르면 일대기</span></h3>
-            <div id="poliList"></div></div>
-          <div class="panel mg" style="margin-bottom:14px"><h3>정당 흥망사 — 창당과 소멸의 연표</h3>
-            <canvas id="chPartyLife" style="width:100%;display:block"></canvas></div>
-          <div class="panel am"><h3>연대기 — 주요 사건</h3>
-            <div id="histList" class="partyList" style="max-height:560px"></div>
+          <div data-hv="parties" style="display:none">
+            <div class="panel mg" style="margin-bottom:14px"><h3>의석의 강 — 역대 총선 정당 의석 흐름</h3>
+              <canvas id="chStream" style="width:100%;display:block"></canvas>
+              <div class="muted" style="font-size:10.5px;margin-top:6px">각 띠가 정당. 두께 = 의석. 합당·분당·흥망이 강물처럼 흐른다.</div></div>
+            <div class="panel mg"><h3>정당 흥망사 — 창당과 소멸의 연표</h3>
+              <canvas id="chPartyLife" style="width:100%;display:block"></canvas></div>
+          </div>
+          <div data-hv="tools" style="display:none">
+            <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px">
+              <button class="btn primary" id="btnDocu">◆ 역사 다큐</button>
+              <button class="btn" id="btnSnap">⧖ 현재 시점 저장</button>
+            </div>
+            <div class="grid g2">
+              <div class="panel"><h3>타임머신 — 갈림길로 돌아가기</h3>
+                <div class="muted" style="font-size:11px;margin-bottom:8px">20년마다 자동 저장. 복원하면 그 시점부터 역사가 다시 갈라진다.</div>
+                <div id="snapList"></div></div>
+              <div class="panel am"><h3>기록실 — 명예와 오욕의 전당</h3><div id="hallList"></div></div>
+            </div>
           </div>
         </div>
 
@@ -888,6 +958,16 @@ class Sim {
     this.blocs = [];            // [{id,name,color,side,parties:[pid]}]
     this.regimeLock = false;       // 체제 잠금(자연 전환 차단)
     this.regionalism = 0;          // 지역주의 강도 0~1
+    this.localGovOn = false;       // 지방정부(주지사) 시스템
+    this.governors = [];           // 주지사 [{region,partyID,leader,since,margin}]
+    this.localAssemblies = [];     // 지방의회 [{region, seats:Map(pid→석)}]
+    this.localSeatsPer = 15;       // 주당 지방의회 의석
+    this.federalPower = 0.5;       // 지방 권한 (0 중앙집권 ~ 1 강한 연방)
+    this.stateGrievance = new Float32Array(NREG); // 주별 중앙 불만(분리 압력)
+    this.fiscalTransfer = true;    // 재정 이전(균형발전) on/off
+    this.policyResistance = 0;     // 현재 정책 저항 강도(파생)
+    this.lastLocalElec = 0;
+    this.lastAssemElec = 0;
     this.regCount = NREG;          // 지역 정서가 작동하는 지역 수 (0~12)
     this._regCumW = REGION_TRAITS.reduce((a,t)=>a+t.popW,0);
     // 심리 기저(항상성 복원점) — 시나리오 프리셋이 바꾼다
@@ -1221,7 +1301,11 @@ class Sim {
     };
     if(!this.politicians) this.politicians=[];
     this.politicians.push(L);
-    if(this.politicians.length>200) this.politicians.shift();
+    if(this.politicians.length>200){
+      // 현직·주요 인물은 보호, 오래된 무명 인물부터 제거
+      const idx=this.politicians.findIndex(L=>!L.office && !L.peakOffice);
+      this.politicians.splice(idx>=0?idx:0,1);
+    }
     return L;
   }
   _factionName(type, ord){
@@ -1589,6 +1673,12 @@ class Sim {
     if(!this.partyLock && this.autoAlliance && this.tick%12===0) this._stepAlliances();
     if(this.factionsOn && this.tick%12===0){ this.stepFactions(); this.stepPoliticians(); }
     if(this.blocsOn && this.tick%12===0) this._stepBlocs();
+    if(this.localGovOn){ this.stepFederalism();
+      if(this.tick-this.lastLocalElec>=this.governorInterval()) this._runGovernorElections(); }
+    if(this.localGovOn && this.tick-(this.lastAssemElec||0)>=this.governorInterval()) {
+      // 주지사 선거 후 절반 시점에 지방의회 선거 (엇갈림)
+      if(this.tick-this.lastLocalElec>=Math.floor(this.governorInterval()/2)) this._runLocalAssemblies();
+    }
   }
 
   // ════════ 블록(bloc): 정당들이 좌우 축으로 항구적 진영을 이룸 ════════
@@ -2104,6 +2194,168 @@ class Sim {
       this.pushNews(2,'norm',`<b>사표 심리</b> — 당선 가능성 낮은 정당 지지층 ${(defected/N*100).toFixed(1)}%가 큰 정당으로 결집 (듀베르제 효과)`);
     }
   }
+  // ── 주지사 선거: 각 주에서 최다 지지 정당이 주지사직 차지 ──
+  // ════════ 3단계: 연방 권력 동학 ════════
+  stepFederalism(){
+    if(!this.localGovOn) return;
+    const S=this.S;
+    // 중앙 집권당
+    const centralId = this.govCoalition.length? this.govCoalition[0] : -1;
+    const central = this.parties.find(p=>p.id===centralId);
+
+    // ── ① 정책 저항: 반대당 주지사가 많을수록 중앙 정책 집행이 막힘 ──
+    let hostile=0, totalGov=0;
+    for(const g of this.governors){ if(!g)continue; totalGov++;
+      if(central && g.partyID!==centralId){
+        // 이념 거리가 멀수록 강하게 저항
+        const gp=this.parties.find(p=>p.id===g.partyID);
+        const d = gp&&central? this.partyDist(gp.cent,central):1;
+        hostile += clamp(0.4+d*0.3);
+      }
+    }
+    const resist = totalGov? hostile/totalGov : 0;
+    this.policyResistance = resist * this.federalPower;   // 연방 권한 클수록 지방이 셈
+    // 저항이 크면 안정도·정부 지지 완만히 침식 (거부권 행사자 gridlock)
+    if(this.policyResistance>0.35 && this.tick%12===0){
+      S.stability=clamp(S.stability - this.policyResistance*2.5, 0, 100);
+      if(this.policyResistance>0.55 && rnd()<0.3)
+        this.pushNews(2,'norm',`<b>연방 갈등</b> — 야당 소속 주지사들이 중앙 정책에 집단 반발, 국정 교착`);
+    }
+
+    // ── ② 재정 이전: 부유한 주 → 가난한 주. 부유주는 불만, 빈곤주는 완화 ──
+    if(this.fiscalTransfer && this.tick%24===0){
+      // 주별 평균 부 계산(간이: REGION_TRAITS.wealth + 지역 소득)
+      for(let r=0;r<NREG;r++){
+        const rich = REGION_TRAITS[r].wealth;   // 1 기준
+        // 부유주(>1)는 뜯기는 불만, 빈곤주(<1)는 혜택 만족
+        const netFlow = (1 - rich) * this.federalPower;  // +면 받음(빈곤주), -면 냄(부유주)
+        // 부유주(netFlow<0)는 뜯겨서 불만↑, 빈곤주는 만족↓불만
+        this.stateGrievance[r] = clamp(this.stateGrievance[r] + (-netFlow)*0.06, 0, 1);
+      }
+    }
+
+    // ── ③ 분리주의: 지역주의 강 + 중앙 불만 큰 주 → 자치·독립 압력 ──
+    if(this.tick%12===0){
+      for(let r=0;r<NREG;r++){
+        const g=this.governors[r]; if(!g)continue;
+        // 그 주의 지역주의 정서 + 중앙과 정당 불일치 + 재정 불만
+        const mismatch = (central && g.partyID!==centralId)?0.35:0;
+        const regFeel = this.regionalism * this._regTribal(r);
+        // 지역주의·중앙불일치가 임계 넘으면 불만 누적 (baseline 완화)
+        const grow = (regFeel*0.5 + mismatch*0.35 - 0.32) * 0.06;
+        this.stateGrievance[r]=clamp(this.stateGrievance[r]+grow,0,1);
+        // 임계 초과 → 사건 (불만 높을수록 자주)
+        if(this.stateGrievance[r]>0.65 && rnd()<0.06+this.stateGrievance[r]*0.12){
+          if(this.federalPower>0.6 && this.stateGrievance[r]>0.8 && rnd()<0.5){
+            this.pushNews(4,'sev3',`<b>${REGION_NAMES[r]} 분리 독립 시도</b> — 자치정부, 중앙에 주권 이양 요구`);
+            this.chron(`${REGION_NAMES[r]} 분리 위기`);
+            S.stability=clamp(S.stability-8,0,100);
+          } else {
+            this.pushNews(3,'sev2',`<b>${REGION_NAMES[r]} 자치 확대 요구</b> — 대규모 지역 시위`);
+            this.chron(`${REGION_NAMES[r]} 자치 요구`);
+          }
+          this.stateGrievance[r]*=0.55;  // 분출 후 완화
+        }
+      }
+    }
+  }
+  _regTribal(r){ // 그 주 시민 평균 부족주의(지역 정서 대리)
+    let s=0,n=0; for(let i=0;i<N;i+=4){ if(this.region[i]===r){s+=this.tribalism[i];n++;} }
+    return n? s/n : 0.5;
+  }
+  _runGovernorElections(){
+    if(!this.localGovOn) return;
+    // 주별 정당 득표 집계
+    const cnt=Array.from({length:NREG},()=>new Map());
+    const tot=new Array(NREG).fill(0);
+    for(let i=0;i<N;i++){ if(this.age[i]<this.con.voteAge||this.party[i]<0)continue;
+      const r=this.region[i], m=cnt[r]; m.set(this.party[i],(m.get(this.party[i])||0)+1); tot[r]++; }
+    const prev=this.governors||[];
+    const next=[];
+    let flips=0;
+    for(let r=0;r<NREG;r++){
+      const arr=[...cnt[r].entries()].sort((a,b)=>b[1]-a[1]);
+      if(!arr.length){ next.push(null); continue; }
+      const winId=arr[0][0]; const win=this.parties.find(p=>p.id===winId);
+      if(!win){ next.push(null); continue; }
+      const margin=(arr[0][1]-(arr[1]?arr[1][1]:0))/Math.max(tot[r],1);
+      const old=prev[r];
+      let leader;
+      if(old && old.partyID===winId && old.leader && !old.leader.dead && !old.leader.retired){
+        leader=old.leader; // 연임
+      } else {
+        // 새 주지사: 그 당 계파 리더 중 이 지역 출신 우선, 없으면 신규
+        leader=this._pickGovernor(win, r);
+        if(old && old.partyID!==winId) flips++;
+      }
+      if(leader){ leader.office='gov'; leader.govReg=r; if(!leader.peakOffice||leader.peakOffice==='leader')leader.peakOffice=leader.peakOffice==='pres'||leader.peakOffice==='pm'?leader.peakOffice:'gov'; }
+      next.push({ region:r, partyID:winId, color:win.color, pname:win.name, leader, since:this.year(), margin });
+    }
+    // 물러난 주지사 정리
+    for(const old of prev){ if(old&&old.leader){ const still=next.some(g=>g&&g.leader===old.leader);
+      if(!still && old.leader.office==='gov'){ old.leader.office=null; old.leader.govReg=undefined; } } }
+    this.governors=next;
+    this.lastLocalElec=this.tick;
+    if(!this.localAssemblies||!this.localAssemblies.length) this._runLocalAssemblies();  // 최초 1회 동시
+    if(flips>0) this.pushNews(2,'norm',`<b>지방선거</b> — ${NREG}개 주 중 ${flips}곳에서 주지사 교체`);
+    else this.pushNews(1,'norm','지방선거 — 주지사 선출 완료');
+    this.chron(`지방선거: ${flips}개 주 정권 교체`);
+  }
+  // 지방의회 선거 (주지사와 어긋난 주기 → 여소야대 발생)
+  _runLocalAssemblies(){
+    if(!this.localGovOn) return;
+    const cnt=Array.from({length:NREG},()=>new Map());
+    for(let i=0;i<N;i++){ if(this.age[i]<this.con.voteAge||this.party[i]<0)continue;
+      cnt[this.region[i]].set(this.party[i],(cnt[this.region[i]].get(this.party[i])||0)+1); }
+    const assemblies=[];
+    for(let r=0;r<NREG;r++){
+      const seatsN=this.localSeatsPer;
+      const arr=[...cnt[r].entries()].filter(([id])=>id>=0);
+      const seatMap=new Map();
+      if(arr.length){
+        const tv=arr.reduce((a,x)=>a+x[1],0)||1;
+        let used=0; const rema=[];
+        for(const [id,v] of arr){ const q=v/tv*seatsN, fl=Math.floor(q); if(fl>0)seatMap.set(id,fl); used+=fl; rema.push([id,q-fl]); }
+        rema.sort((a,b)=>b[1]-a[1]);
+        for(let k=0; used<seatsN && rema.length; k=(k+1)%rema.length){ const id=rema[k][0]; seatMap.set(id,(seatMap.get(id)||0)+1); used++; }
+      }
+      assemblies.push({ region:r, seats:seatMap });
+    }
+    this.localAssemblies=assemblies;
+    this.lastAssemElec=this.tick;
+  }
+  // 전국 지방의회 총 의석 (정당별)
+  localAssemblyTotals(){
+    const tot=new Map();
+    for(const a of (this.localAssemblies||[])){ if(!a)continue;
+      a.seats.forEach((n,id)=>tot.set(id,(tot.get(id)||0)+n)); }
+    return tot;
+  }
+  // 여소야대: 주지사 정당이 지방의회 과반(50%)을 못 가진 주
+  localDividedCount(){
+    let n=0;
+    for(let r=0;r<NREG;r++){ const g=this.governors[r], a=this.localAssemblies[r];
+      if(!g||!a||!a.seats.size)continue;
+      const total=[...a.seats.values()].reduce((x,y)=>x+y,0)||1;
+      const govSeats=a.seats.get(g.partyID)||0;
+      if(govSeats <= total*0.5) n++;   // 주지사 여당이 과반 미달 → 여소야대
+    }
+    return n;
+  }
+  _pickGovernor(party, reg){
+    // 그 당 계파 리더 중 이 지역 연고자 우선
+    if(party.factions){
+      const cands=party.factions.map(f=>f.leader).filter(L=>L&&!L.dead&&!L.retired&&!L.office);
+      const local=cands.find(L=>L.homeReg===reg);
+      if(local) return local;
+      if(cands.length) return cands[0];
+    }
+    // 신규 정치인 추대 (이 지역 출신)
+    const L=this._makeLeader(null, party);
+    L.homeReg=reg; L.party=party.name;
+    return L;
+  }
+  governorInterval(){ return Math.max(12, Math.round((this.con.term||4)*12*0.75)); } // 중앙의 3/4 주기
   election(){
     const S=this.S, C=this.con;
     if(this.regime==='MIL'){ this.pushNews(3,'sev3','군정 당국, 총선 무기한 연기 발표'); return; }
@@ -2806,6 +3058,11 @@ class Sim {
       nextPartyId:this.nextPartyId, gov:this.govCoalition, lastElection:this.lastElection, lastSenate:this.lastSenate,
       news:this.news.slice(0,40), chron:this.chronicle.slice(0,120),
       politicians:(this.politicians||[]).slice(-120), nextLid:this._nextLid||0,
+      localGovOn:this.localGovOn, lastLocalElec:this.lastLocalElec,
+      governors:(this.governors||[]).map(g=>g?{region:g.region,partyID:g.partyID,color:g.color,pname:g.pname,lid:g.leader?g.leader.lid:null,since:g.since,margin:g.margin}:null),
+      localSeatsPer:this.localSeatsPer, federalPower:this.federalPower, fiscalTransfer:this.fiscalTransfer,
+      stateGrievance:Array.from(this.stateGrievance||[]),
+      localAssem:(this.localAssemblies||[]).map(a=>a?{region:a.region,seats:[...a.seats.entries()]}:null),
       C:{age:arr(this.age),wealth:arr(this.wealth),education:arr(this.education),income:arr(this.income),
          jobSec:arr(this.jobSec),mobility:arr(this.mobility),openness:arr(this.openness),fear:arr(this.fear),
          conformity:arr(this.conformity),tribalism:arr(this.tribalism),ambition:arr(this.ambition),
@@ -2836,6 +3093,12 @@ class Sim {
     // 정당/계파의 leader를 명부 객체로 재연결(참조 일원화)
     const lmap=new Map(s.politicians.map(L=>[L.lid,L]));
     for(const p of s.parties){ if(p.leader&&p.leader.lid&&lmap.has(p.leader.lid))p.leader=lmap.get(p.leader.lid); }
+    s.localGovOn=d.localGovOn||false; s.lastLocalElec=d.lastLocalElec||0;
+    s.governors=(d.governors||[]).map(g=>g?{region:g.region,partyID:g.partyID,color:g.color,pname:g.pname,leader:g.lid?lmap.get(g.lid)||null:null,since:g.since,margin:g.margin}:null);
+    s.localSeatsPer=d.localSeatsPer||15;
+    if(d.federalPower!==undefined)s.federalPower=d.federalPower; if(d.fiscalTransfer!==undefined)s.fiscalTransfer=d.fiscalTransfer;
+    if(d.stateGrievance)s.stateGrievance=Float32Array.from(d.stateGrievance);
+    s.localAssemblies=(d.localAssem||[]).map(a=>a?{region:a.region,seats:new Map(a.seats)}:null);
     for(const p of s.parties) if(p.home==null) p.home=-1;
     s.news=d.news; s.chronicle=d.chron;
     for(const f in d.C){ const src=d.C[f];
@@ -2902,6 +3165,25 @@ const UI={
     $('#btnAlly').onclick=()=>{ const r=$('#allyRow'); r.style.display= r.style.display==='none'?'block':'none'; if(r.style.display==='block')this.renderAllyPicker(); };
     // ── 의회 뷰 전환 칩 ──
     this.parlView='party'; this.axisMode='pca';
+    // 지도 모드 토글
+    this.mapMode='support';
+    if($('#mapSvg')) $('#mapSvg').addEventListener('click',e=>{
+      const el=e.target.closest('[id^=reg]'); if(!el)return;
+      const r=+el.id.replace('reg',''); if(isNaN(r))return;
+      this.showState(r);
+    });
+    document.addEventListener('click',e=>{ const m=e.target.closest('.viewChip[data-map]'); if(!m)return;
+      this.mapMode=m.dataset.map;
+      document.querySelectorAll('[data-map]').forEach(c=>c.classList.toggle('sel',c===m));
+      this.renderMap();
+    });
+    document.addEventListener('input',e=>{ if(e.target.id==='fedPowSl'){ this.sim.federalPower=+e.target.value/100;
+      $('#fedPowV').textContent=e.target.value+'%'; } });
+    document.addEventListener('change',e=>{ if(e.target.id==='fiscalTog'){ this.sim.fiscalTransfer=e.target.checked; }
+      if(e.target.id==='localGovTog'){ this.sim.localGovOn=e.target.checked;
+      if(e.target.checked){ this.sim._runGovernorElections(); this.sim.pushNews(1,'norm','<b>지방정부 도입</b> — 각 주에서 주지사를 선출한다'); }
+      else this.sim.pushNews(1,'norm','지방정부 폐지 — 중앙집권 체제로');
+      this.render(true); } });
     document.addEventListener('click',e=>{ const a=e.target.closest('.viewChip[data-axis]'); if(!a)return;
       this.axisMode=a.dataset.axis;
       document.querySelectorAll('[data-axis]').forEach(c=>c.classList.toggle('sel',c===a));
@@ -2911,6 +3193,21 @@ const UI={
       this.parlView=v.dataset.view;
       document.querySelectorAll('#parlViewBar .viewChip').forEach(c=>c.classList.toggle('sel', c===v));
       this.renderParliament();
+    });
+    // ── 역사 뷰 전환 ──
+    this.histView='events';
+    document.addEventListener('click',e=>{ const h=e.target.closest('.viewChip[data-hview]'); if(!h)return;
+      this.histView=h.dataset.hview;
+      document.querySelectorAll('[data-hview]').forEach(c=>c.classList.toggle('sel',c===h));
+      document.querySelectorAll('#page-hist [data-hv]').forEach(d=>d.style.display= d.dataset.hv===this.histView?'':'none');
+      this.renderHistView();
+    });
+    // ── 표심 분석 뷰 전환 ──
+    this.analysisView='support';
+    document.addEventListener('click',e=>{ const a=e.target.closest('.viewChip[data-anly]'); if(!a)return;
+      this.analysisView=a.dataset.anly;
+      document.querySelectorAll('[data-anly]').forEach(c=>c.classList.toggle('sel',c===a));
+      this.renderAnalysis();
     });
     // ── 반원 오버레이 토글 ──
     this._parlOverlay={maj:false,label:false,gov:false,group:false};
@@ -2964,8 +3261,14 @@ const UI={
       if(ed){ this.openPedit(+ed.dataset.edit); return; }
       const sp=e.target.closest('[data-split]');
       if(sp){ this.openSplit(+sp.dataset.split); return; }
-      const b=e.target.closest('.banBtn[data-ban]'); if(!b)return;
-      this.sim.banParty(+b.dataset.ban); this.render(true);
+      const b=e.target.closest('.banBtn[data-ban]');
+      if(b){ this.sim.banParty(+b.dataset.ban); this.render(true); return; }
+      // 계파 접기/펼치기 (아코디언)
+      const row=e.target.closest('.party[data-pid]'); if(!row)return;
+      const pid=+row.dataset.pid;
+      if(!this._facOpen)this._facOpen=new Set();
+      if(this._facOpen.has(pid))this._facOpen.delete(pid); else this._facOpen.add(pid);
+      this.renderParties();
     };
     $('#spClose').onclick=()=>{ $('#splitPage').classList.remove('show'); this.paused=this._spPrev; };
     $('#spFrac').oninput=()=>{ $('#spFracV').textContent=$('#spFrac').value+'%'; };
@@ -3174,6 +3477,8 @@ const UI={
     }
   },
   bind(){
+    $('#btnGear').onclick=e=>{ e.stopPropagation(); const m=$('#gearMenu'); m.style.display=m.style.display==='none'?'block':'none'; };
+    document.addEventListener('click',e=>{ const m=$('#gearMenu'); if(m&&m.style.display!=='none'&&!e.target.closest('#gearMenu')&&!e.target.closest('#btnGear')) m.style.display='none'; });
     $('#btnPause').onclick=()=>{ this.paused=!this.paused;
       $('#btnPause').textContent=this.paused?'▶ 재생':'⏸ 일시정지';
       $('#btnPause').classList.toggle('active',this.paused); };
@@ -3265,18 +3570,17 @@ const UI={
       drawLine($('#chInfl'),s.hist.infl,'#ffc14d');
       drawLine($('#chDem'),s.hist.dem,'#9dff5a',0,100);
     }
-    if(page==='page-pol'){ this.renderParliament(); this.renderParties(); this.renderPoll(); this.renderSupportChart(); this.renderStack(); this.renderElectoral(); this.renderDemoSup(); }
+    if(page==='page-pol'){ this.renderParliament(); this.renderParties(); this.renderPoll(); this.renderAnalysis(); }
     if(page==='page-soc'){ this.renderGauges();
       drawMulti($('#chPolz'),[
         {data:s.hist.polz,color:'#ff5ad1',label:'양극화'},
         {data:s.hist.trust,color:'#54e0ff',label:'체제신뢰'},
         {data:s.hist.rad,color:'#ff6262',label:'급진화'}],0,100);
       drawLine($('#chGen'),s.hist.gen,'#9dff5a',0,100);
-      this.renderPyramid(); this.renderWealth();
+      this.renderPyramid(); this.renderWealth(); this.renderScatter();
     }
-    if(page==='page-map'){ this.renderMap(); this.renderRegSup(); this.renderRegTraits(); this.syncRegio(); }
-    if(page==='page-cit') this.renderScatter();
-    if(page==='page-hist'){ this.renderChronicle(); this.renderRegimeBand(); this.renderPartyLife(); this.renderSnaps(); this.renderHall(); this.renderPoliticians(); this.renderStream(); }
+    if(page==='page-map'){ this.renderMap(); this.renderRegSup(); this.renderRegTraits(); this.renderGovPanel(); this.syncRegio(); }
+    if(page==='page-hist') this.renderHistView();
     if(page==='page-gov') this.renderActs();
     this.renderTicker();
   },
@@ -3327,6 +3631,12 @@ const UI={
           <div style="font-size:14px;font-weight:600;color:var(--tx);margin-top:2px">${dday}</div></div>
       </div>
       <div style="font-size:12px;color:var(--tx2);line-height:1.6">${story}</div>`;
+    // 최근 주요 사건 (연대기 상위 5건)
+    const de=$('#dashEvents');
+    if(de){ const evs=(s.chronicle||[]).slice(0,5);
+      de.innerHTML= evs.length? evs.map(c=>`<div style="display:flex;gap:9px;font-size:11.5px;padding:4px 0;border-bottom:1px solid rgba(130,170,255,0.06)">
+        <span style="font-family:var(--mono);color:var(--cy);min-width:44px">${c.y}년</span><span style="color:var(--tx2)">${c.t}</span></div>`).join('')
+        : '<div class="muted" style="font-size:11px">아직 기록된 사건이 없다.</div>'; }
   },
   renderKPIs(){
     const s=this.sim,S=s.S,H=s.hist;
@@ -3661,6 +3971,19 @@ const UI={
   },
 
   // ── 지지 구성 누적 비율 영역 그래프 ──
+  renderAnalysis(){
+    const v=this.analysisView||'support';
+    // 해당 뷰만 표시
+    document.querySelectorAll('#analysisPanel [data-av]').forEach(d=>d.style.display= d.dataset.av===v?'':'none');
+    const titles={support:'정당 지지율 추이',stack:'지지 구성의 역사 — 민심의 지층',age:'세대별 표심 — 누가 누구를 지지하는가',
+      'class':'학력·자산별 표심',seats:'의석 변천사 — 역대 총선',estat:'선거 동향 — 표심은 의석에 얼마나 닿았나'};
+    const t=$('#analysisTitle'); if(t)t.textContent='표심 분석 — '+(titles[v]||'');
+    // 보이는 차트만 렌더 (숨긴 canvas는 width 0이라 렌더 불가)
+    if(v==='support') this.renderSupportChart();
+    else if(v==='stack') this.renderStack();
+    else if(v==='age'||v==='class') this.renderDemoSup();
+    else if(v==='seats'||v==='estat') this.renderElectoral();
+  },
   renderStack(){
     const s=this.sim, cv=$('#chStack'); const [g,w,h]=prepCanvas(cv);
     const SUP=Object.values(s.hist.support);
@@ -3960,6 +4283,13 @@ const UI={
     this.snaps.push({y:this.sim.year(), kind, regime:REGIME[this.sim.regime].name, json:this.sim.serialize()});
     if(this.snaps.length>4)this.snaps.shift();
   },
+  renderHistView(){
+    const v=this.histView||'events';
+    if(v==='events'){ this.renderChronicle(); this.renderRegimeBand(); }
+    else if(v==='people'){ this.renderPoliticians(); }
+    else if(v==='parties'){ this.renderStream(); this.renderPartyLife(); }
+    else if(v==='tools'){ this.renderSnaps(); this.renderHall(); }
+  },
   renderSnaps(){
     $('#snapList').innerHTML= this.snaps.length? this.snaps.map((sn,i)=>
       `<div class="snapRow"><b>${sn.y}년</b> <span>${sn.regime}</span>
@@ -4017,7 +4347,7 @@ const UI={
     // 현직·생존 우선, 그다음 영향력(rises) 순
     const rank=L=>(L.office?100:0)+(L.dead?-50:0)+(L.rises||0)*5+(L.peakOffice==='pres'?30:0)+L.charisma*10;
     const sorted=[...pols].sort((a,b)=>rank(b)-rank(a)).slice(0,16);
-    const officeLbl={pres:'대통령',pm:'총리',leader:'당대표'};
+    const officeLbl={pres:'대통령',pm:'총리',leader:'당대표',gov:'주지사'};
     host.innerHTML=sorted.map(L=>{
       const age=s.year()-L.born;
       const status = L.dead?'<span style="color:var(--tx3)">고인</span>' : L.retired?'<span style="color:var(--tx3)">은퇴</span>'
@@ -4038,7 +4368,7 @@ const UI={
     const age=s.year()-L.born;
     // 그 인물 관련 연대기
     const story=s.chronicle.filter(c=>c.t.includes(L.name));
-    const officeLbl={pres:'대통령',pm:'총리',leader:'당대표'};
+    const officeLbl={pres:'대통령',pm:'총리',leader:'당대표',gov:'주지사'};
     const lines=[];
     lines.push(`<b>${L.name}</b> · ${L.origin}년 정계 입문 (당시 ${L.origin-L.born}세)`);
     lines.push(`출신: ${REGION_NAMES[L.homeReg]||'미상'} · 현재 ${L.dead?'고인('+age+'세 별세 추정)':age+'세'}`);
@@ -4315,17 +4645,23 @@ const UI={
       const ally=s.allianceOf(p.id);
       const allyBadge= ally? `<span class="allyTag" style="background:${ally.color}22;color:${ally.color};border:1px solid ${ally.color}55">⛓ ${ally.name}</span>`:'';
       // 계파 스트립
-      let facHtml='';
+      let facHtml='', facHint='';
       if(s.factionsOn && p.factions && p.factions.length>=2){
-        const typeCol={est:'#54e0ff',rad:'#ff5a7a',ref:'#9dff5a',pers:'#ffb24d'};
-        const segs=p.factions.map(f=>`<div title="${f.name} ${(f.share*100).toFixed(0)}% (${{est:'주류',rad:'강경',ref:'개혁',pers:'인물'}[f.type]||''})"
-          style="flex:${f.share};background:${typeCol[f.type]||'#888'};${f.dom?'box-shadow:inset 0 0 0 1.5px rgba(255,255,255,0.5)':''}"></div>`).join('');
-        const labels=p.factions.map(f=>`<span style="color:${typeCol[f.type]||'#888'}">${f.dom?'●':'○'}${f.name} ${(f.share*100).toFixed(0)}%</span>`).join('  ');
-        facHtml=`<div class="facStrip"><div class="facBar">${segs}</div><div class="facLabels">${labels}</div></div>`;
+        const open=this._facOpen && this._facOpen.has(p.id);
+        if(open){
+          const typeCol={est:'#54e0ff',rad:'#ff5a7a',ref:'#9dff5a',pers:'#ffb24d'};
+          const segs=p.factions.map(f=>`<div title="${f.name} ${(f.share*100).toFixed(0)}% (${{est:'주류',rad:'강경',ref:'개혁',pers:'인물'}[f.type]||''})"
+            style="flex:${f.share};background:${typeCol[f.type]||'#888'};${f.dom?'box-shadow:inset 0 0 0 1.5px rgba(255,255,255,0.5)':''}"></div>`).join('');
+          const labels=p.factions.map(f=>`<span style="color:${typeCol[f.type]||'#888'}">${f.dom?'●':'○'}${f.name} ${(f.share*100).toFixed(0)}%</span>`).join('  ');
+          facHtml=`<div class="facStrip"><div class="facBar">${segs}</div><div class="facLabels">${labels}</div></div>`;
+          facHint=`<span class="facTgl" style="color:var(--cy)">▾ 계파 ${p.factions.length}</span>`;
+        } else {
+          facHint=`<span class="facTgl">▸ 계파 ${p.factions.length}</span>`;
+        }
       }
-      return `<div class="party" style="${ally?`border-left:3px solid ${ally.color}`:''}">
+      return `<div class="party" data-pid="${p.id}" style="cursor:pointer;${ally?`border-left:3px solid ${ally.color}`:''}">
         <div class="pdot" style="background:${p.color};box-shadow:0 0 9px ${p.color}"></div>
-        <div class="pinfo"><div class="pname">${p.name} ${tags.map(t=>`<span class="tagm">${t}</span>`).join('')}${allyBadge}</div>
+        <div class="pinfo"><div class="pname">${p.name} ${tags.map(t=>`<span class="tagm">${t}</span>`).join('')}${allyBadge}${facHint}</div>
         <div class="pslogan">${p.leader?`<span style="color:${p.color}">▸ ${p.leader.name}</span> 대표${p.leader.office==='pres'?' · <b style="color:var(--am)">대통령</b>':''} · `:''}"${p.slogan}"</div>${facHtml}</div>
         <button class="banBtn edit" data-edit="${p.id}" title="편집">✎</button>
         <button class="banBtn split" data-split="${p.id}" title="분당">⑂</button>
@@ -4422,8 +4758,155 @@ const UI={
     }
     svg.innerHTML=html;
   },
+    showState(r){
+    const s=this.sim; if(r<0||r>=NREG)return;
+    const RT=REGION_TRAITS[r];
+    const g=s.localGovOn? s.governors[r]:null;
+    const a=s.localGovOn? s.localAssemblies[r]:null;
+    // 지역 정당 지지
+    const cnt=new Map(); let tot=0;
+    for(let i=0;i<N;i++){ if(this.sim.region[i]!==r||this.sim.party[i]<0||this.sim.age[i]<18)continue;
+      cnt.set(this.sim.party[i],(cnt.get(this.sim.party[i])||0)+1); tot++; }
+    const supp=[...cnt.entries()].sort((a,b)=>b[1]-a[1]).slice(0,4).map(([id,v])=>{
+      const p=s.parties.find(q=>q.id===id); return p?`<span style="color:${p.color}">${p.name} ${(v/Math.max(tot,1)*100).toFixed(0)}%</span>`:''; }).filter(Boolean).join(' · ');
+    let html=`<div style="font-size:12px;line-height:1.9;color:var(--tx2)">
+      <b style="color:var(--tx)">${REGION_NAMES[r]}</b> · ${RT.name}<br>
+      산업 ${INDUSTRY_LABEL[RT.ind]} · 도시화 ${(RT.urban*100|0)}% · 인구가중 ${RT.popW}<br>
+      정당 지지: ${supp||'—'}</div>`;
+    if(g){
+      const gv=s.stateGrievance?s.stateGrievance[r]:0;
+      const grTx = gv>0.72?`<span style="color:#ff6262"> · 분리 압력 ${(gv*100|0)}%</span>`: gv>0.4?`<span style="color:var(--am)"> · 중앙 불만 ${(gv*100|0)}%</span>`:'';
+      html+=`<div style="margin-top:12px;border-top:1px solid rgba(130,170,255,0.12);padding-top:10px">
+        <div style="font-size:10.5px;color:var(--tx3);letter-spacing:1px;margin-bottom:5px">주지사${grTx}</div>
+        <div style="font-size:13px"><span style="color:${g.color};font-weight:600">${g.pname}</span>${g.leader?` · ${g.leader.name} (${s.year()-g.leader.born}세)`:''}</div></div>`;
+    }
+    if(a&&a.seats.size){
+      const total=[...a.seats.values()].reduce((x,y)=>x+y,0);
+      const rows=[...a.seats.entries()].sort((x,y)=>y[1]-x[1]).map(([id,n])=>{ const p=s.parties.find(q=>q.id===id);
+        const isGov=g&&id===g.partyID;
+        return `<div style="display:flex;align-items:center;gap:7px;font-size:11px;margin-bottom:3px">
+          <div class="pdot" style="background:${p?p.color:'#888'}"></div><span style="min-width:74px">${p?p.name:'?'}${isGov?' <span style="color:var(--am);font-size:9px">여당</span>':''}</span>
+          <div style="flex:1;height:8px;border-radius:4px;background:rgba(120,140,180,0.1);overflow:hidden"><div style="width:${n/total*100}%;height:100%;background:${p?p.color:'#888'}"></div></div>
+          <span style="font-family:var(--mono);font-size:9.5px;color:var(--tx3)">${n}</span></div>`; }).join('');
+      const gs=g?(a.seats.get(g.partyID)||0):0;
+      const divided=g&&gs<=total*0.5;
+      html+=`<div style="margin-top:12px;border-top:1px solid rgba(130,170,255,0.12);padding-top:10px">
+        <div style="font-size:10.5px;color:var(--tx3);letter-spacing:1px;margin-bottom:6px">지방의회 (${total}석)${divided?' <span style="color:var(--am)">· 여소야대</span>':''}</div>
+        ${rows}</div>`;
+    }
+    this._modal(REGION_NAMES[r], html);
+  },
+    renderGovPanel(){
+    const s=this.sim, host=$('#govPanel'); if(!host)return;
+    if($('#localGovTog'))$('#localGovTog').checked=s.localGovOn;
+    if(!s.localGovOn){ host.innerHTML='<div class="muted" style="font-size:10.5px">지방정부가 꺼져 있다.</div>'; return; }
+    const govs=s.governors.filter(g=>g);
+    if(!govs.length){ host.innerHTML='<div class="muted" style="font-size:10.5px">첫 지방선거 대기 중…</div>'; return; }
+    const byParty=new Map();
+    govs.forEach(g=>byParty.set(g.partyID,(byParty.get(g.partyID)||0)+1));
+    const central=s.govCoalition.length?s.parties.find(p=>p.id===s.govCoalition[0]):null;
+    const topGov=[...byParty.entries()].sort((a,b)=>b[1]-a[1])[0];
+    const topP=topGov?s.parties.find(p=>p.id===topGov[0]):null;
+    const divided = central && topP && central.id!==topP.id;
+    let html='';
+    if(divided) html+=`<div style="font-size:11px;padding:6px 9px;border-radius:7px;background:rgba(255,180,77,0.1);border:1px solid rgba(255,180,77,0.3);color:var(--am);margin-bottom:9px">⚠ 분할정부 — 중앙은 <b>${central.name}</b>, 지방 다수는 <b>${topP.name}</b></div>`;
+    // 정당별 주지사 수 막대
+    html+='<div style="font-size:10px;color:var(--tx3);letter-spacing:1px;margin:8px 0 5px">주지사 (12주)</div>';
+    html+=[...byParty.entries()].sort((a,b)=>b[1]-a[1]).map(([id,n])=>{
+      const p=s.parties.find(q=>q.id===id);
+      return `<div style="display:flex;align-items:center;gap:8px;font-size:11.5px;margin-bottom:4px">
+        <div class="pdot" style="background:${p?p.color:'#888'}"></div>
+        <span style="min-width:80px">${p?p.name:'?'}</span>
+        <div style="flex:1;height:9px;border-radius:5px;background:rgba(120,140,180,0.1);overflow:hidden"><div style="width:${n/NREG*100}%;height:100%;background:${p?p.color:'#888'}"></div></div>
+        <span style="font-family:var(--mono);color:var(--tx3);font-size:10px">${n}주</span></div>`;
+    }).join('');
+    // 지방의회 총 의석
+    const atot=s.localAssemblyTotals();
+    if(atot.size){
+      const grand=[...atot.values()].reduce((a,b)=>a+b,0);
+      html+='<div style="font-size:10px;color:var(--tx3);letter-spacing:1px;margin:11px 0 5px">지방의회 전국 합산 ('+grand+'석)</div>';
+      html+='<div style="display:flex;height:12px;border-radius:6px;overflow:hidden;background:rgba(120,140,180,0.1)">';
+      html+=[...atot.entries()].sort((a,b)=>b[1]-a[1]).map(([id,n])=>{ const p=s.parties.find(q=>q.id===id);
+        return `<div style="flex:${n};background:${p?p.color:'#888'}" title="${p?p.name:'?'} ${n}석"></div>`; }).join('');
+      html+='</div>';
+      const div=s.localDividedCount();
+      if(div>0) html+=`<div style="font-size:10.5px;color:var(--am);margin-top:7px">⚡ ${div}개 주에서 주지사가 지방의회 과반을 잃음 (여소야대)</div>`;
+    }
+    host.innerHTML=html;
+    // 연방 동학 컨트롤/상태
+    const fc=$('#fedControls'); if(fc){ fc.style.display=s.localGovOn?'block':'none';
+      if($('#fedPowSl')){ $('#fedPowSl').value=Math.round(s.federalPower*100); $('#fedPowV').textContent=Math.round(s.federalPower*100)+'%'; }
+      if($('#fiscalTog'))$('#fiscalTog').checked=s.fiscalTransfer;
+      const fs=$('#fedStatus');
+      if(fs){
+        const resist=s.policyResistance||0;
+        const maxGr=Math.max(...(s.stateGrievance||[0]));
+        const hotStates=[...(s.stateGrievance||[])].map((v,r)=>[r,v]).filter(x=>x[1]>0.5).sort((a,b)=>b[1]-a[1]);
+        let sh='';
+        const rCol=resist>0.5?'#ff6262':resist>0.3?'#ffb24d':'#5ae0b4';
+        sh+=`<div style="font-size:10.5px;color:var(--tx3);margin-bottom:4px">국정 교착도 <span style="color:${rCol};font-family:var(--mono)">${(resist*100|0)}%</span> ${resist>0.5?'— 심각한 연방 갈등':resist>0.3?'— 정책 지연':''}</div>`;
+        if(hotStates.length){
+          sh+='<div style="font-size:10.5px;color:var(--tx3);margin-top:5px">분리·자치 압력:</div>';
+          sh+=hotStates.slice(0,4).map(([r,v])=>{ const c=v>0.72?'#ff6262':v>0.6?'#ffb24d':'#8fa3c8';
+            return `<div style="display:flex;align-items:center;gap:6px;font-size:10.5px;margin-top:3px"><span style="min-width:60px">${REGION_NAMES[r]}</span>
+              <div style="flex:1;height:6px;border-radius:3px;background:rgba(120,140,180,0.1);overflow:hidden"><div style="width:${v*100}%;height:100%;background:${c}"></div></div>
+              <span style="font-family:var(--mono);color:${c};font-size:9.5px">${v>0.72?'위험':(v*100|0)+'%'}</span></div>`; }).join('');
+        }
+        fs.innerHTML=sh;
+      }
+    }
+  },
     renderMap(){
     const s=this.sim;
+    const mode=this.mapMode||'support';
+    // ── 주지사 모드 ──
+    if(mode==='gov' && s.localGovOn){
+      const legendAgg=new Map();
+      for(let r=0;r<NREG;r++){
+        const g=s.governors[r]; const el=$('#reg'+r); if(!el)continue;
+        if(g){ el.setAttribute('fill',g.color); el.setAttribute('fill-opacity',(0.35+clamp(g.margin*3,0,0.55)).toFixed(2));
+          el.querySelector('title').textContent=`${REGION_NAMES[r]} 주지사 — ${g.pname}${g.leader?' ('+g.leader.name+')':''}`;
+          legendAgg.set(g.partyID,(legendAgg.get(g.partyID)||0)+1);
+        } else { el.setAttribute('fill','rgba(120,140,180,0.12)'); el.querySelector('title').textContent=`${REGION_NAMES[r]} — 주지사 공석`; }
+      }
+      $('#mapLegend').innerHTML=[...legendAgg.entries()].sort((a,b)=>b[1]-a[1]).map(([id,n])=>{
+        const p=s.parties.find(q=>q.id===id);
+        return `<div class="lgRow"><div class="pdot" style="background:${p?p.color:'#888'}"></div>${p?p.name:'?'}<b>${n}개 주</b></div>`;
+      }).join('')||'<div class="muted">주지사 없음 — 지방선거 대기</div>';
+      return;
+    }
+    // ── 지방의회 다수당 모드 ──
+    if(mode==='assem' && s.localGovOn){
+      const legendAgg=new Map();
+      for(let r=0;r<NREG;r++){
+        const a=s.localAssemblies[r]; const el=$('#reg'+r); if(!el)continue;
+        if(a&&a.seats.size){ let top=-1,tv=0,total=0; a.seats.forEach((v,id)=>{total+=v;if(v>tv){tv=v;top=id;}});
+          const p=s.parties.find(q=>q.id===top);
+          el.setAttribute('fill',p?p.color:'#888'); el.setAttribute('fill-opacity',(0.3+clamp(tv/total,0,0.6)).toFixed(2));
+          el.querySelector('title').textContent=`${REGION_NAMES[r]} 지방의회 — 다수 ${p?p.name:'?'} (${tv}/${total}석)`;
+          if(p)legendAgg.set(top,(legendAgg.get(top)||0)+1);
+        } else { el.setAttribute('fill','rgba(120,140,180,0.12)'); }
+      }
+      $('#mapLegend').innerHTML=[...legendAgg.entries()].sort((a,b)=>b[1]-a[1]).map(([id,n])=>{
+        const p=s.parties.find(q=>q.id===id);
+        return `<div class="lgRow"><div class="pdot" style="background:${p?p.color:'#888'}"></div>${p?p.name:'?'}<b>${n}주 다수</b></div>`;
+      }).join('')||'<div class="muted">지방의회 없음</div>';
+      return;
+    }
+    // ── 분리 압력(중앙 불만) 히트맵 ──
+    if(mode==='grievance' && s.localGovOn){
+      for(let r=0;r<NREG;r++){ const el=$('#reg'+r); if(!el)continue;
+        const v=s.stateGrievance[r]||0;
+        // 낮음(파랑)~높음(빨강)
+        const col = v>0.72?'#ff3b3b': v>0.5?'#ff8c42': v>0.3?'#ffd166':'#4a9eff';
+        el.setAttribute('fill',col); el.setAttribute('fill-opacity',(0.25+v*0.6).toFixed(2));
+        el.querySelector('title').textContent=`${REGION_NAMES[r]} — 중앙 불만 ${(v*100|0)}%${v>0.72?' (분리 위험)':''}`;
+      }
+      $('#mapLegend').innerHTML='<div class="lgRow"><div class="pdot" style="background:#4a9eff"></div>낮음</div>'
+        +'<div class="lgRow"><div class="pdot" style="background:#ffd166"></div>불만</div>'
+        +'<div class="lgRow"><div class="pdot" style="background:#ff3b3b"></div>분리 위험</div>';
+      return;
+    }
     // 지역별 정당 점유 집계
     const tally=Array.from({length:NREG},()=>new Map());
     const tot=new Array(NREG).fill(0);
