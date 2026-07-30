@@ -1697,16 +1697,25 @@ class Sim {
       }
     }
     // (b) 정당 진화: 지지자 무게중심으로 이동 / 급진화·온건화
-    const sums=this.parties.map(()=>({v:new Float64Array(6),n:0,rad:0,av:new Float64Array(6),an:0}));
+    const sums=this.parties.map(()=>({v:new Float64Array(6),n:0,rad:0,pool:[]}));
     const tmp=new Float64Array(6);
+    const zbuf=[];  // 표본별 zvec 캐시(활동가 상위 재계산용)
     for(let i=0;i<N;i+=2){ const pid=this.party[i]; if(pid<0) continue;
       const pi=this.parties.findIndex(p=>p.id===pid); if(pi<0) continue;
       this.zvec(i,tmp); const s=sums[pi];
       for(let k=0;k<6;k++)s.v[k]+=tmp[k]; s.n++; s.rad+=this.radical[i];
-      // 활동가(핵심 당원): 충성도·일체감·정치관심이 높은 지지자 — May의 법칙
-      if(this.loyalty[i]*0.9 + (this.partyID?this.partyID[i]*0.9:0) + this.polInterest[i]*0.6 + this.radical[i]*0.7 > 1.15){
-        for(let k=0;k<6;k++)s.av[k]+=tmp[k]; s.an++;
+      const commit = this.loyalty[i]*0.9 + (this.partyID?this.partyID[i]*0.9:0) + this.polInterest[i]*0.6 + this.radical[i]*0.7;
+      s.pool.push({commit, z:Float64Array.from(tmp)});
+    }
+    for(const s of sums){
+      s.av=new Float64Array(6); s.an=0;
+      if(s.pool.length>=12){
+        // 정당 내부 상위 30% 충성층만 "활동가"로 (절대 임계 아닌 상대 순위 — 정당 규모와 무관하게 항상 소수정예)
+        const cut=Math.max(6, Math.round(s.pool.length*0.30));
+        s.pool.sort((a,b)=>b.commit-a.commit);
+        for(let k=0;k<cut;k++){ const z=s.pool[k].z; for(let d=0;d<6;d++)s.av[d]+=z[d]; s.an++; }
       }
+      s.pool=null;
     }
     for(let pi=0;pi<this.parties.length;pi++){
       const p=this.parties[pi], s=sums[pi];
