@@ -412,6 +412,7 @@ canvas.chart.tall{height:210px}
     <div class="spacer"></div>
     <button class="btn" id="btnPause">⏸ 일시정지</button>
     <div class="speedGroup">
+      <button class="btn spd" data-s="0.5">0.5×</button>
       <button class="btn spd" data-s="1">1×</button>
       <button class="btn spd active" data-s="4">4×</button>
       <button class="btn spd" data-s="12">12×</button>
@@ -448,6 +449,11 @@ canvas.chart.tall{height:210px}
           <div class="panel" id="headlineCard" style="margin-bottom:14px;border-color:rgba(84,224,255,0.2)">
             <div id="headlineBody"></div></div>
           <div class="kpis" id="kpis"></div>
+          <div class="panel" style="margin-bottom:14px;display:none;border-color:rgba(255,180,77,0.35)" id="refPanel">
+            <h3>국민투표</h3><div id="refBody"></div></div>
+          <div class="panel" style="margin-bottom:14px" id="demoHealthPanel">
+            <h3>민주주의 건강도 — 체제 위기 조기경보</h3>
+            <div id="demoHealth"></div></div>
           <div class="panel am" style="margin-bottom:14px"><h3>최근 주요 사건 <span style="margin-left:auto;font-size:10px;color:var(--tx3)">역사 탭에 전체 연대기</span></h3>
             <div id="dashEvents"></div></div>
           <div class="grid g2">
@@ -561,6 +567,9 @@ canvas.chart.tall{height:210px}
               <button class="viewChip" data-anly="age">세대별</button>
               <button class="viewChip" data-anly="class">학력·자산별</button>
               <button class="viewChip" data-anly="seats">의석 변천사</button>
+              <button class="viewChip" data-anly="jobsec">고용안정별</button>
+              <button class="viewChip" data-anly="mobil">이동성 인식별</button>
+              <button class="viewChip" data-anly="retro">정권평가별</button>
               <button class="viewChip" data-anly="estat">선거 동향</button>
             </div>
             <div data-av="support"><canvas class="chart tall" id="chSupport"></canvas></div>
@@ -568,7 +577,22 @@ canvas.chart.tall{height:210px}
             <div data-av="age" style="display:none"><canvas class="chart tall" id="chAgeSup"></canvas></div>
             <div data-av="class" style="display:none"><canvas class="chart tall" id="chClassSup"></canvas></div>
             <div data-av="seats" style="display:none"><canvas class="chart tall" id="chSeats"></canvas></div>
+            <div data-av="jobsec" style="display:none"><canvas class="chart tall" id="chJobSec"></canvas></div>
+            <div data-av="mobil" style="display:none"><canvas class="chart tall" id="chMobil"></canvas></div>
+            <div data-av="retro" style="display:none"><canvas class="chart tall" id="chRetro"></canvas></div>
             <div data-av="estat" style="display:none"><canvas class="chart tall" id="chEstat"></canvas></div>
+          </div>
+          <div class="panel lm" style="margin-top:14px" id="issuePanel">
+            <h3>쟁점 — 지금 정국을 가르는 사안
+              <label class="cChk" style="margin-left:auto;font-size:10px;gap:5px"><input type="checkbox" id="issueTog" checked>쟁점 정치</label></h3>
+            <div id="issueBody"></div>
+            <div id="voteHistory" style="margin-top:12px;border-top:1px solid rgba(130,170,255,0.1);padding-top:10px"></div>
+            <div style="display:flex;align-items:center;gap:9px;margin-top:10px;font-size:11px;color:var(--tx2)">
+              <span style="min-width:70px">회고적 투표</span>
+              <input type="range" id="retroSl" min="0" max="250" step="10" style="flex:1;accent-color:var(--rd);height:3px">
+              <em id="retroV" style="font-style:normal;font-family:var(--mono);font-size:10px;min-width:34px;text-align:right"></em>
+            </div>
+            <div class="cHint" style="margin:-2px 0 0 0">올리면 유권자가 이념보다 <b>집권 성과</b>로 심판한다. 경제·치안이 나쁘면 여당이 무너지고, 연립·여소야대일수록 책임이 흐려져 심판이 약해진다.</div>
           </div>
           <div class="panel am" style="margin-top:14px" id="distPanel">
             <h3>지역구 — 전체 300개 열람 가능</h3>
@@ -606,6 +630,12 @@ canvas.chart.tall{height:210px}
             <div class="panel lm"><h3>세대 갈등 지수</h3><canvas class="chart" id="chGen"></canvas></div>
             <div class="panel lm"><h3>인구 구조 — 연령 분포</h3><canvas class="chart tall" id="chPyr"></canvas></div>
             <div class="panel mg"><h3>자산 분포 — 부는 어디에 쌓이는가</h3><canvas class="chart tall" id="chWealth"></canvas></div>
+          </div>
+          <div class="panel am" style="margin-top:14px" id="citizenPanel">
+            <h3>시민 한 사람 — 통계 뒤의 인생
+              <button class="sysBtn" id="citPick" style="margin-left:auto">🎲 무작위</button>
+              <button class="sysBtn" id="citPin">📌 추적</button></h3>
+            <div id="citBody"></div>
           </div>
           <div style="margin-top:14px">
           <div class="panel">
@@ -684,6 +714,7 @@ canvas.chart.tall{height:210px}
             <button class="viewChip sel" data-hview="events">사건</button>
             <button class="viewChip" data-hview="people">인물</button>
             <button class="viewChip" data-hview="parties">정당</button>
+            <button class="viewChip" data-hview="story">이야기</button>
             <button class="viewChip" data-hview="tools">도구</button>
           </div>
           <div data-hv="events">
@@ -709,6 +740,12 @@ canvas.chart.tall{height:210px}
               <div class="muted" style="font-size:10.5px;margin-top:6px">각 띠가 정당. 두께 = 의석. 합당·분당·흥망이 강물처럼 흐른다.</div></div>
             <div class="panel mg"><h3>정당 흥망사 — 창당과 소멸의 연표</h3>
               <canvas id="chPartyLife" style="width:100%;display:block"></canvas></div>
+          </div>
+          <div data-hv="story" style="display:none">
+            <div class="panel" style="margin-bottom:14px"><h3>시대 — 이 나라가 지나온 국면</h3>
+              <div id="eraList"></div></div>
+            <div class="panel mg"><h3>정권 교체의 순간들</h3>
+              <div id="turnList"></div></div>
           </div>
           <div data-hv="tools" style="display:none">
             <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px">
@@ -1040,6 +1077,15 @@ class Sim {
     this.colorMode = 'fixed';      // 'fixed' 고정 팔레트 | 'ideology' 이념 기반
     this.colorConvention = 'eu';   // 'eu' 좌=적/우=청 | 'us' 좌=청/우=적
     this.activistPull = 0.30;
+    this.retroWeight = 1.0;        // 회고적 투표 강도(0=순수 이념투표)
+    this.issuesOn = true;          // 쟁점 시스템
+    this.issues = [];              // 활성 쟁점 [{key,name,axis,dir,sal,born}]
+    this.voteRecords = [];         // 법안 표결 기록
+    this.rigidity = 'rigid';       // 헌법 경직성: 'free' 즉시 | 'flex' 의회 표결 | 'rigid' 가중다수+국민투표
+    this.amendSuper = 2/3;         // 개헌 의회 가중다수 요건
+    this.pinnedCitizen = -1;       // 추적 중인 시민
+    this.pinLog = [];              // 추적 이력
+    this.confSupply = [];          // 신임과 공급(각외 협력) 정당 [pid]
     this.allyMaxLR = 0.6;          // 자생 연합 허용 좌우 격차
     this.districtResults = [];     // 최근 총선 지역구별 결과      // 활동가 가중(May의 법칙): 정당이 핵심 당원 쪽으로 끌리는 정도
     this.localGovOn = false;       // 지방정부(주지사) 시스템
@@ -1092,6 +1138,7 @@ class Sim {
     this.party=new Int16Array(N).fill(-1);
     this.loyalty=F(N);
     this.partyID=F(N);   // 정당일체감(Campbell): 큰 정당에 누적 충성 — 死票 학습
+    this.retroEval=F(N); // 회고적 투표: 집권 성과 평가 (-1~+1)
     this.adaptCost=F(N); // 기술 변화 적응 비용 누적
 
     for(let i=0;i<N;i++) this.spawnCitizen(i,true);
@@ -1359,6 +1406,53 @@ class Sim {
   // ════════ 계파(faction) 시스템 ════════
   // 정당 지지자를 당내 군집화 → 계파 발생. 지배 계파가 당 노선을 끌어당김.
   // ════════ 정치인(named leader) 시스템 ════════
+  // 정당명 정규화: 가운뎃점 제거 · 접두어 중복 정리 · 10자 상한
+  // 좌우 정렬 순서를 안정적으로 유지 (A: 히스테리시스, B: 선거 시점에만 재계산)
+  stableLROrder(force){
+    const live=this.parties.filter(p=>p.id>=0);
+    if(!this._lrOrder) this._lrOrder=[];
+    // 신규/소멸 정당 반영은 항상, 순서 재계산은 선거 직후 또는 force일 때만
+    const liveIds=new Set(live.map(p=>p.id));
+    this._lrOrder=this._lrOrder.filter(id=>liveIds.has(id));
+    for(const p of live) if(!this._lrOrder.includes(p.id)){
+      // 새 정당은 현재 LR 기준 알맞은 자리에 삽입
+      const lr=this.lr(p.cent);
+      let idx=this._lrOrder.findIndex(id=>{ const q=this.parties.find(x=>x.id===id); return q && this.lr(q.cent)>lr; });
+      if(idx<0) idx=this._lrOrder.length;
+      this._lrOrder.splice(idx,0,p.id);
+    }
+    if(force || this._lrOrderTick===undefined || this.elections.length!==this._lrOrderElec){
+      this._lrOrderElec=this.elections.length; this._lrOrderTick=this.tick;
+      // 히스테리시스 버블 정렬: 인접 쌍의 LR 차가 임계 이상 역전됐을 때만 교체
+      const TH=0.15;
+      for(let pass=0; pass<this._lrOrder.length; pass++){
+        let moved=false;
+        for(let i=0;i<this._lrOrder.length-1;i++){
+          const A=this.parties.find(x=>x.id===this._lrOrder[i]);
+          const B=this.parties.find(x=>x.id===this._lrOrder[i+1]);
+          if(!A||!B)continue;
+          if(this.lr(A.cent) - this.lr(B.cent) > TH){
+            this._lrOrder[i]=B.id; this._lrOrder[i+1]=A.id; moved=true;
+          }
+        }
+        if(!moved)break;
+      }
+    }
+    return this._lrOrder.map(id=>this.parties.find(p=>p.id===id)).filter(Boolean);
+  }
+  _normPartyName(nm){
+    if(!nm) return '무명당';
+    let s=String(nm).replace(/[·・･]/g,'').replace(/\s+/g,'');   // C: 가운뎃점·공백 제거
+    // D: 접두어 중복 방지 (정통신사회… 같은 중첩 차단)
+    s=s.replace(/^(정통|신|재건|새|청년|민주)+(?=(정통|신|재건|새|청년|민주))/,'');
+    if(s.length<=10) return s;
+    // 10자 초과: 접미사를 보존하며 어간을 줄인다
+    const sufM=s.match(/(국민회의|노동자동맹|혁명당|연합|연대|전선|동맹|회의|당)$/);
+    const suf=sufM?sufM[0]:'당';
+    const stem=s.slice(0, s.length-suf.length);
+    const room=Math.max(1, 10-suf.length);
+    return stem.slice(0, room)+suf;
+  }
   _politicianName(){
     const sur=['김','이','박','최','정','강','조','윤','장','임','한','오','서','신','권','황','안','송','류','전','홍','고','문','손','배','백','허','유','남','심'];
     const g1=['재','정','성','지','승','준','현','민','상','우','경','태','종','형','국','병','동','영','광','대','진','수','호','석','원','철','용','기','선','명'];
@@ -1696,6 +1790,7 @@ class Sim {
     let nm=this.nameParty(cent, clamp(fac.rad+0.1)).name;
     // 계보감: 급진 이탈이면 원조 당명에 '정통/신/재건' 접두, 온건 이탈이면 그대로 새 이름
     if(fac.type==='rad' && rnd()<0.4) nm = pick(['정통','신','재건'])+p.name.replace(/^(정통|신|재건)/,'');
+    nm = this._normPartyName(nm);
     const np={ id:this.nextPartyId++, name:nm, slogan:`${p.name}을(를) 떠나 새 길로`,
       color:this._pickColor(),
       cent, rad:clamp(fac.rad+0.1), support:0, seats:0, founded:this.year(), lowStreak:0, home:p.home,
@@ -1735,7 +1830,7 @@ class Sim {
         if(!name){ const base=pick(bank.names.filter(x=>!used.has(x)))||pick(bank.names);
           name = used.has(base)? pick(['신','새','청년','민주'])+base : base; }
         const slogan = pick(bank.slogans);
-        return {name, slogan};
+        return {name:this._normPartyName(name), slogan};
       }
     }
     // ── 폴백: 원형이 뚜렷하지 않은 애매한 중도 신생정당 → 기존 조어형 ──
@@ -1761,7 +1856,7 @@ class Sim {
       `${w2}의 시대를 ${w1}으로`, `${w1}, ${w2} 그리고 내일`,
       `다시 ${w2}로`, `${w1} 없는 ${w2}는 없다`, `우리의 답은 ${w1}이다`,
     ];
-    return {name, slogan:pick(slogans)};
+    return {name:this._normPartyName(name), slogan:pick(slogans)};
   }
   // 원형 판정: 뚜렷한 극단 조합일 때만 매칭, 애매하면 null(폴백)
   _archetypeOf(cent, rad){
@@ -1984,6 +2079,13 @@ class Sim {
     if(!this.partyLock && this.autoAlliance && this.tick%12===0) this._stepAlliances();
     if(this.factionsOn && this.tick%12===0){ this.stepFactions(); this.stepPoliticians(); }
     if(this.tick%12===0) this.updatePartyColors();
+    if(this.tick%12===0){ for(const p of this.parties){ if(p.id<0)continue;
+      if(!p.lrHist) p.lrHist=[];
+      p.lrHist.push({y:this.year(), lr:+this.lr(p.cent).toFixed(3), sup:+(p.support||0).toFixed(3)});
+      if(p.lrHist.length>200) p.lrHist.shift(); } }
+    if(this.tick%3===0) this.stepRetrospective();
+    if(this.tick%6===0){ this.stepIssues(); this.stepLegislation(); this.stepConfSupply(); }
+    if(this.pinnedCitizen>=0 && this.tick%6===0) this._logPinned();
     if(this.alliances.length) this._stepJointConvergence();
     if(this.blocsOn && this.tick%12===0) this._stepBlocs();
     if(this.localGovOn){ this.stepFederalism();
@@ -2096,6 +2198,308 @@ class Sim {
   }
 
   // ── 정당 지지 갱신 (거리 + 충성 + 이웃 + 회고 투표) ──
+  // ════════ 회고적 투표(Fiorina): 집권 성과에 대한 시민별 평가 ════════
+  // ════════ 쟁점(issue) 시스템 ════════
+  get _issueBank(){
+    // axis: 0 openness,1 fear,2 conformity,3 tribalism,4 resentment,5 trust
+    return [
+      {key:'welfare', name:'복지 확대와 증세',   axis:4, need:s=>s.inequality>0.34||s.unemployment>7},
+      {key:'pension', name:'연금 개혁',          axis:4, need:s=>true},
+      {key:'labor',   name:'노동시장 유연화',    axis:4, need:s=>s.unemployment>6},
+      {key:'immig',   name:'이민 정책',          axis:3, need:s=>s.migration>0.15},
+      {key:'region',  name:'지역 자치 확대',     axis:3, need:s=>true},
+      {key:'security',name:'치안 강화',          axis:1, need:s=>s.crime>32},
+      {key:'speech',  name:'집회·표현 규제',     axis:2, need:s=>s.mediaFreedom<70},
+      {key:'env',     name:'환경 규제',          axis:0, need:s=>s.technologyGrowth>0.8},
+      {key:'edu',     name:'교육 개혁',          axis:0, need:s=>true},
+      {key:'corrupt', name:'부패 척결·정치 개혁',axis:5, need:s=>s.stability<62},
+      {key:'housing', name:'주거·부동산',        axis:4, need:s=>s.housingCost>45},
+    ];
+  }
+  stepIssues(){
+    if(!this.issuesOn){ this.issues=[]; return; }
+    const S=this.S;
+    // 1) 현저성 감쇠 + 소멸
+    for(const it of this.issues) it.sal=clamp(it.sal-0.006,0,1);
+    const dead=this.issues.filter(it=>it.sal<0.05);
+    for(const d of dead) this.chron(`쟁점 소멸: ${d.name}`);
+    this.issues=this.issues.filter(it=>it.sal>=0.05);
+    // 2) 점화: 사회 상태에 어울리는 쟁점이 확률적으로 등장
+    if(this.issues.length<3 && rnd()<0.05){
+      const pool=this._issueBank.filter(b=>!this.issues.some(i=>i.key===b.key) && b.need(S));
+      if(pool.length){
+        const b=pool[(rnd()*pool.length)|0];
+        const it={key:b.key,name:b.name,axis:b.axis,sal:0.45+rnd()*0.35,born:this.year()};
+        this.issues.push(it);
+        this.pushNews(3,'norm',`<b>쟁점 부상</b> — '${it.name}'이(가) 정국의 중심으로 떠올랐다`);
+        this.chron(`쟁점 부상: ${it.name}`);
+      }
+    }
+    // 3) 사건 연동 재점화: 위기 시 관련 쟁점 현저성 급등
+    const boost=(key,amt)=>{ const it=this.issues.find(i=>i.key===key); if(it) it.sal=clamp(it.sal+amt,0,1); };
+    if(S.unemployment>10) boost('labor',0.02), boost('welfare',0.015);
+    if(S.crime>38) boost('security',0.025);
+    if(S.inflation>8) boost('housing',0.02);
+    if(S.stability<45) boost('corrupt',0.02);
+  }
+  // 정당의 쟁점 입장(-1~+1): 심리 좌표에서 자동 도출 (하드코딩 없음)
+  issueStance(p, it){ return clamp((p.cent[it.axis]||0)*1.6, -1, 1); }
+  // 추적 시민의 상태 기록
+  _logPinned(){
+    const i=this.pinnedCitizen; if(i<0||i>=N) return;
+    if(!this.pinLog) this.pinLog=[];
+    const last=this.pinLog[this.pinLog.length-1];
+    const cur={ y:this.year(), age:Math.round(this.age[i]), party:this.party[i],
+      wealth:+this.wealth[i].toFixed(2), jobSec:+this.jobSec[i].toFixed(2),
+      resent:+this.resentment[i].toFixed(2), radical:+this.radical[i].toFixed(2),
+      retro:+(this.retroEval?this.retroEval[i]:0).toFixed(2) };
+    // 의미 있는 변화가 있을 때만 이벤트로 남긴다
+    if(!last){ this.pinLog.push({...cur, ev:'추적 시작'}); return; }
+    let ev=null;
+    if(last.party!==cur.party){
+      const op=this.parties.find(p=>p.id===last.party), np=this.parties.find(p=>p.id===cur.party);
+      ev = cur.party<0? `${op?op.name:'지지 정당'} 이탈 — 무당층으로`
+         : `${op?op.name+'에서 ':''}${np?np.name:'신당'} 지지로 전향`;
+    }
+    else if(last.jobSec-cur.jobSec>0.25) ev='고용 불안 급증';
+    else if(cur.jobSec-last.jobSec>0.25) ev='고용 안정 회복';
+    else if(cur.resent-last.resent>0.2) ev='박탈감 심화';
+    else if(cur.radical-last.radical>0.2) ev='급진화';
+    if(ev){ this.pinLog.push({...cur, ev}); if(this.pinLog.length>60)this.pinLog.shift(); }
+    else if(this.pinLog.length && this.year()-this.pinLog[this.pinLog.length-1].y>=10)
+      { this.pinLog.push({...cur, ev:null}); if(this.pinLog.length>60)this.pinLog.shift(); }
+  }
+  pinCitizen(i){ this.pinnedCitizen=i; this.pinLog=[]; this._logPinned(); }
+  randomCitizen(){ let i; let g=0; do{ i=(rnd()*N)|0; g++; }while(this.age[i]<18 && g<50); return i; }
+  // ════════ 서사 생성: 인과 문장 · 시대 구분 · 회고록 ════════
+  // 한국어 조사: 받침 유무로 자동 선택
+  _josa(w, withB, noB){
+    if(!w) return noB;
+    const c=w.charCodeAt(w.length-1);
+    if(c<0xAC00||c>0xD7A3) return noB;
+    return ((c-0xAC00)%28)?withB:noB;
+  }
+  // (a) 정권 교체를 인과가 드러나는 문장으로
+  narrateTurnover(t){
+    const J=(w,a,b)=>this._josa(w,a,b);
+    const from=t.from||'기존 여당', to=t.to||'신생 세력';
+    let out;
+    if(t.retro<-0.15 && t.unemp>9)
+      out=`실업률이 ${t.unemp.toFixed(0)}%에 이르자 심판 여론이 확산됐고, 유권자는 ${from}${J(from,'을','를')} 버렸다.`;
+    else if(t.retro<-0.12)
+      out=`경제 성적표에 실망한 유권자들이 ${from}에 등을 돌렸다.`;
+    else if(t.scandal)
+      out=`잇단 의혹으로 흔들리던 ${from}${J(from,'은','는')} 결국 정권을 내주었다.`;
+    else if(Math.abs(t.seatSwing)<20)
+      out=`뚜렷한 위기 없이도 유권자는 변화를 택했다. ${from}에서 ${to}${J(to,'으로','로')}의 교체는 근소했다.`;
+    else
+      out=`${to}${J(to,'이','가')} 큰 폭의 약진으로 ${from}${J(from,'을','를')} 밀어냈다.`;
+    return `${t.y}년, `+out;
+  }
+  // (b) 시대 구분: 체제 변경·정당체계 격변·지표 급변을 경계로 구간을 자른다
+  detectEras(){
+    const els=this.elections||[];
+    if(els.length<3) return [];
+    const eras=[]; let start=els[0], prevLead=null, prevENP=null;
+    const push=(from,to,reason)=>{
+      const span=els.filter(e=>e.y>=from.y && e.y<=to.y);
+      if(!span.length) return;
+      // 지배적 특징으로 이름 붙이기
+      const leadCount={};
+      span.forEach(e=>{ const w=e.results&&e.results[0]; if(w) leadCount[w.name]=(leadCount[w.name]||0)+1; });
+      const top=Object.entries(leadCount).sort((a,b)=>b[1]-a[1])[0];
+      const enpAvg=span.reduce((a,e)=>a+(e.enpS||0),0)/span.length;
+      let name;
+      if(top && top[1]>=span.length*0.75) name=`${top[0]} 장기집권기`;
+      else if(enpAvg>4.5) name='대분열의 시대';
+      else if(enpAvg<2.4) name='양당 교대기';
+      else name='다당 경쟁기';
+      eras.push({ from:from.y, to:to.y, name, reason, elections:span.length, enp:enpAvg });
+    };
+    let sinceBoundary=0;
+    for(let i=1;i<els.length;i++){
+      const e=els[i], lead=e.results&&e.results[0]?e.results[0].name:null;
+      sinceBoundary++;
+      let boundary=null;
+      // 제1당 교체 + 정당체계 변동
+      if(prevLead && lead && lead!==prevLead && prevENP!==null && Math.abs((e.enpS||0)-prevENP)>0.7) boundary='정당체계 격변';
+      // 유효정당수 급변
+      if(prevENP!==null && Math.abs((e.enpS||0)-prevENP)>1.3) boundary='유효정당수 급변';
+      // 너무 길어지면(선거 12회 이상) 강제로 시대를 끊는다
+      if(!boundary && sinceBoundary>=12) boundary='세대 교체';
+      if(boundary && sinceBoundary>=3){ push(start, els[i-1], boundary); start=e; sinceBoundary=0; }
+      prevLead=lead; prevENP=e.enpS||prevENP;
+    }
+    push(start, els[els.length-1], '현재');
+    return eras;
+  }
+  // (c) 정치인 회고록: 이벤트 나열이 아니라 문단형 서사
+  narrateLife(L){
+    if(!L) return '';
+    const yr=this.year(), age=yr-L.born;
+    const parts=[];
+    const reg=(REGION_NAMES[L.homeReg]||'변방');
+    parts.push(`${L.origin}년, ${reg}에서 정계에 입문했다.`);
+    const officeLbl={pres:'대통령',pm:'총리',leader:'당대표',gov:'주지사'};
+    if(L.peakOffice) parts.push(`${officeLbl[L.peakOffice]}까지 올랐다.`);
+    else parts.push(`끝내 정상에는 닿지 못했다.`);
+    if(L.charisma>0.65) parts.push('대중을 사로잡는 언변으로 이름이 높았다.');
+    else if(L.charisma<0.3) parts.push('대중적 인기와는 거리가 멀었다.');
+    if(L.ambition>0.7) parts.push('권력을 향한 야심을 숨기지 않았다.');
+    if(L.integrity>0.7 && !L.scandal) parts.push('청렴함으로 존경받았다.');
+    if(L.scandal) parts.push(`${L.scandal}건의 의혹이 그를 따라다녔다.`);
+    if(L.rises>2) parts.push(`${L.rises}번의 부침을 겪으며 정치적 생명을 이어갔다.`);
+    if(L.dead) parts.push(`${age}세로 세상을 떠났다.`);
+    else if(L.retired) parts.push('정계를 떠나 침묵했다.');
+    else parts.push(`${age}세, 여전히 현역이다.`);
+    return parts.join(' ');
+  }
+  // ════════ 신임과 공급(confidence & supply) ════════
+  // 각외 협력: 내각에 참여하지 않되 불신임안·예산안에서 정부를 지지한다.
+  // 연정보다 느슨해 이념 거리가 멀어도 성립하지만, 개별 법안에서는 이탈한다.
+  _seekConfidenceSupply(lead, ranked, seats, maj){
+    this.confSupply=[];
+    const cands=ranked.filter(p=>!this.govCoalition.includes(p.id) && p.seats>0)
+      .sort((a,b)=>this.partyDist(lead.cent,a)-this.partyDist(lead.cent,b));
+    for(const o of cands){
+      if(seats>maj) break;
+      const d=this.partyDist(lead.cent,o);
+      // 연정(1.7~2.4)보다 넓은 3.2까지 허용 — 대신 성사 확률은 거리에 반비례
+      if(d<3.2 && rnd()< (0.75 - d*0.14)){
+        this.confSupply.push(o.id); seats+=o.seats;
+      }
+    }
+    if(this.confSupply.length){
+      const names=this.confSupply.map(id=>{const p=this.parties.find(q=>q.id===id);return p?p.name:'';}).filter(Boolean).join(', ');
+      this.pushNews(3,'norm',`<b>신임과 공급</b> — ${names}이(가) 각외 협력으로 소수정부를 지탱한다`);
+      this.chron(`신임과 공급 체결: ${names}`);
+    }
+    return seats;
+  }
+  // 신임과 공급 파트너의 이탈 여부 점검 (매 틱)
+  stepConfSupply(){
+    if(!this.confSupply || !this.confSupply.length) return;
+    const lead=this.parties.find(p=>p.id===this.govCoalition[0]);
+    if(!lead){ this.confSupply=[]; return; }
+    for(const id of [...this.confSupply]){
+      const p=this.parties.find(q=>q.id===id);
+      if(!p || p.seats<=0){ this.confSupply=this.confSupply.filter(x=>x!==id); continue; }
+      const d=this.partyDist(lead.cent,p);
+      // 이념 거리가 벌어지거나 정부 성과가 나쁘면 협약 파기
+      const badGov = this.S.stability<45;
+      if(rnd() < 0.010*(d*0.8) + (badGov?0.012:0)){
+        this.confSupply=this.confSupply.filter(x=>x!==id);
+        this.pushNews(3,'sev2',`<b>${p.name}</b>, 신임과 공급 협약 파기 — 정부 지지 철회`);
+        this.chron(`${p.name} 각외 협력 파기`);
+        this.S.stability=clamp(this.S.stability-4,0,100);
+      }
+    }
+  }
+  // ════════ 법안 표결: 쟁점이 의회에서 실제로 처리된다 ════════
+  stepLegislation(){
+    if(!this.issuesOn || !this.issues.length) return;
+    if(!this.parties.some(p=>p.seats>0)) return;
+    // 현저성 높은 쟁점이 법안으로 상정
+    const hot=this.issues.filter(it=>it.sal>0.45 && (this.tick-(it.lastBill||-999))>36);
+    if(!hot.length || rnd()>0.12) return;
+    const it=hot[(rnd()*hot.length)|0];
+    it.lastBill=this.tick;
+    // 법안 방향: 집권 세력의 입장을 따른다
+    const govId=this.govCoalition[0];
+    const govP=this.parties.find(p=>p.id===govId);
+    const dir = govP? (this.issueStance(govP,it)>=0?1:-1) : (rnd()<0.5?1:-1);
+    const billName = `${it.name} ${dir>0?'확대':'억제'} 법안`;
+    // 정당별 표결
+    const rows=[]; let yes=0,no=0,abst=0;
+    const elecNear = (this.lastElection+this.con.term*12 - this.tick) < 12;   // 선거 임박
+    for(const p of this.parties){
+      if(p.id<0 || !p.seats) continue;
+      const st=this.issueStance(p,it);
+      const align = st*dir;                       // +면 찬성 성향
+      // 연립 규율: 여당은 정부안에 반대하기 어렵다
+      const inGov=this.govCoalition.includes(p.id);
+      const inCS=(this.confSupply||[]).includes(p.id);
+      // 각외 협력은 예산·신임엔 협조하나 개별 법안 규율은 약하다(0.55 → 0.20)
+      let score = align + (inGov?0.55:0) + (inCS?0.20:0) - (inGov||inCS?0:0.05);
+      // 선거 임박 시 인기 없는 법안엔 이탈
+      if(elecNear) score -= Math.abs(align)<0.25?0.25:0;
+      // 계파 갈등이 크면 이탈표
+      let defect=0;
+      if(this.factionsOn && p.factions && p.factions.length>=2){
+        const opp=p.factions.filter(f=>{ const fs=clamp((f.cent[it.axis]||0)*1.6,-1,1); return fs*dir<0; });
+        defect = opp.reduce((a,f)=>a+f.share,0);
+      }
+      let v = score>0.18? 'yes' : score<-0.18? 'no' : 'abst';
+      // 이탈표 반영: 의석 일부가 반대편으로
+      const dSeats = Math.round(p.seats*clamp(defect*0.6,0,0.45));
+      const mainSeats = p.seats - dSeats;
+      if(v==='yes'){ yes+=mainSeats; no+=dSeats; }
+      else if(v==='no'){ no+=mainSeats; yes+=dSeats; }
+      else { abst+=mainSeats; no+=dSeats; }
+      rows.push({pid:p.id, name:p.name, color:p.color, vote:v, seats:p.seats, defect:dSeats});
+    }
+    const total=yes+no+abst;
+    const passed = yes > no;
+    // 기록
+    this.voteRecords.unshift({ y:this.year(), bill:billName, issue:it.key, issueName:it.name,
+      dir, yes, no, abst, passed, rows });
+    if(this.voteRecords.length>80) this.voteRecords.pop();
+    // 결과 반영
+    const S=this.S;
+    if(passed){
+      const mag=0.55;
+      if(it.key==='welfare'){ S.inequality=clamp(S.inequality-0.012*dir,0.15,0.7); S.economy*=(1-0.004*dir); }
+      else if(it.key==='pension'){ S.stability=clamp(S.stability-2*dir,0,100); }
+      else if(it.key==='labor'){ S.unemployment=clamp(S.unemployment-0.5*dir,1.5,35); S.inequality=clamp(S.inequality+0.008*dir,0.15,0.7); }
+      else if(it.key==='immig'){ S.migration=clamp(S.migration+0.05*dir,0,1); }
+      else if(it.key==='security'){ S.crime=clamp(S.crime-2.5*dir,5,80); S.mediaFreedom=clamp(S.mediaFreedom-1.5*dir,10,100); }
+      else if(it.key==='speech'){ S.mediaFreedom=clamp(S.mediaFreedom-4*dir,10,100); }
+      else if(it.key==='env'){ S.technologyGrowth=clamp(S.technologyGrowth-0.05*dir,0.3,2); }
+      else if(it.key==='corrupt'){ S.stability=clamp(S.stability+3*dir,0,100); }
+      else if(it.key==='housing'){ S.housingCost=clamp(S.housingCost-3*dir,10,95); }
+      else if(it.key==='edu'){ S.technologyGrowth=clamp(S.technologyGrowth+0.03*dir,0.3,2); }
+      this.pushNews(3,'pos',`<b>${billName} 가결</b> — 찬성 ${yes} · 반대 ${no} · 기권 ${abst}`);
+      this.chron(`${billName} 가결 (찬 ${yes}/반 ${no})`);
+      it.sal=clamp(it.sal-0.25,0,1);   // 처리되면 현저성 감소
+    } else {
+      this.pushNews(3,'sev2',`<b>${billName} 부결</b> — 찬성 ${yes} · 반대 ${no} · 기권 ${abst}`);
+      this.chron(`${billName} 부결`);
+      S.stability=clamp(S.stability-1.5,0,100);   // 국정 동력 상실
+      it.sal=clamp(it.sal+0.10,0,1);              // 미해결로 쟁점 격화
+    }
+  }
+  stepRetrospective(){
+    const S=this.S;
+    // 집권 여부 확인
+    if(!this.govCoalition.length){ return; }
+    // 성과 원자료(각 -1~+1로 정규화)
+    const perfGrowth = clamp(S.gdpGrowth/1.2, -1, 1);
+    const perfJobs   = clamp((7 - S.unemployment)/6, -1, 1);
+    const perfPrice  = clamp((4 - S.inflation)/6, -1, 1);
+    const perfCrime  = clamp((35 - S.crime)/30, -1, 1);
+    const perfStab   = clamp((S.stability-50)/40, -1, 1);
+    // 책임 귀속(Powell & Whitten): 연립·분할정부일수록 책임이 흐려진다
+    let clarity = 1/Math.max(1, this.govCoalition.length);          // 연립 규모
+    if(this.gridlock) clarity*=0.7;                                  // 여소야대
+    if(this.localGovOn && this.governors && this.governors.length){   // 지방권력 분열
+      const cid=this.govCoalition[0];
+      const opp=this.governors.filter(g=>g&&g.partyID!==cid).length;
+      clarity *= (1 - 0.3*(opp/Math.max(1,this.governors.length)));
+    }
+    clarity=clamp(clarity,0.15,1);
+    // 시민별 평가: 처지에 따라 중시하는 지표가 다르다
+    for(let i=0;i<N;i++){
+      if(this.age[i]<this.con.voteAge) continue;
+      const poor = 1-clamp(this.wealth[i]);          // 가난할수록 실업·물가 민감
+      const rich = clamp(this.wealth[i]);            // 부유할수록 성장률 민감
+      const fear = clamp(this.fear[i]);              // 공포 높을수록 치안 민감
+      let perf = perfJobs*(0.30+poor*0.30) + perfPrice*(0.20+poor*0.25)
+               + perfGrowth*(0.15+rich*0.30) + perfCrime*(0.10+fear*0.30) + perfStab*0.15;
+      perf = clamp(perf/1.6, -1, 1);
+      // 최근 성과에 더 큰 가중(선거 직전 체감이 중요) — 지수이동평균
+      this.retroEval[i] = clamp(lerp(this.retroEval[i], perf*clarity, 0.06), -1, 1);
+    }
+  }
   stepSupport(){
     if(!this.parties.length){ return; }
     const S=this.S;
@@ -2103,6 +2507,8 @@ class Sim {
     const tmp=new Float64Array(6);
     const counts=new Map(this.parties.map(p=>[p.id,0]));
     const ruling=new Set(this.govCoalition);
+    const rw=(this.retroWeight??1)*1.35;   // 회고적 투표 강도
+    const acts=(this.issuesOn&&this.issues.length)?this.issues:null;   // 활성 쟁점
     // 공동명부: 정당별 (통합 프리미엄, 이념 격차) 사전 계산
     const jl=new Map();
     for(const a of this.alliances){ if((a.depth||1)<2)continue;
@@ -2121,6 +2527,15 @@ class Sim {
           u += this.regionalism * p.regAff[this.region[i]] * 5.0 * (0.6+this.tribalism[i]*0.8); // 우리 지역의 당
         if(p.home===this.region[i]) u += 0.13*(0.4+this.tribalism[i]);   // 지역주의: 거점 지역 결집
         u += Math.sqrt(p.support)*0.45*(0.5+this.conformity[i]);   // 밴드왜건(당선 가능성·동조)
+        // 회고적 투표: 집권 세력은 성과로 심판받는다
+        if(rw && ruling.has(p.id)) u += this.retroEval[i]*rw*(0.55+this.polInterest[i]*0.7);
+        // 쟁점 투표: 내가 중시하는 쟁점에서 입장이 가까운 정당을 지지
+        if(acts){ for(const it of acts){
+          const mine=clamp(tmp[it.axis]*1.6,-1,1);           // 시민 입장
+          const theirs=clamp((p.cent[it.axis]||0)*1.6,-1,1); // 정당 입장
+          const care=it.sal*(0.4+this.polInterest[i]*0.9);   // 현저성 × 개인 관심
+          u += (1-Math.abs(mine-theirs))*care*0.55;
+        } }
         if(jl.size){ const J=jl.get(p.id);
           if(J){ u += J.prem*(0.45+this.polInterest[i]*0.75);                       // 통합 프리미엄(사표 우려 해소·집권 가능성)
                  u -= J.gap*(this.tribalism[i]*0.5+this.radical[i]*0.5)*0.85; } }   // 순수주의 반발
@@ -2150,41 +2565,150 @@ class Sim {
     if(m===this.con.method || !METHODNAME[m]) return;
     this.propose('sys', m, METHODNAME[m]);
   }
-  propose(kind, value, label){
-    if(this.referendum){ this.pushNews(1,'norm','이미 진행 중인 국민투표가 있다'); return; }
-    this.referendum={kind, value, at:this.tick+3, label};
-    this.pushNews(3,'sev2',`정부, <b>개헌안 발의</b> — ${label} 전환, 3개월 뒤 국민투표`);
+  propose(kind, value, label, payload){
+    if(this.referendum){ this.pushNews(1,'norm','이미 진행 중인 국민투표가 있다'); return false; }
+    const mode=this.rigidity||'rigid';
+    if(mode==='free'){ this._enactAmendment({kind,value,label,payload}); return true; }
+    // 1단계: 의회 표결
+    const need = mode==='rigid'? (this.amendSuper||2/3) : 0.5;
+    const tot=this.parties.reduce((a,p)=>a+(p.seats||0),0)||1;
+    let yes=0; const rows=[];
+    const ruling=new Set(this.govCoalition), cs=new Set(this.confSupply||[]);
+    for(const p of this.parties){ if(p.id<0||!p.seats)continue;
+      // 개헌 찬성: 여당·각외협력은 정부안 지지, 야당은 이념 거리로 판단
+      const lead=this.parties.find(q=>q.id===this.govCoalition[0]);
+      const d = lead? this.partyDist(lead.cent,p) : 2;
+      let sc = ruling.has(p.id)? 0.9 : cs.has(p.id)? 0.45 : (0.55 - d*0.28);
+      const v = sc>0.35;
+      if(v) yes+=p.seats;
+      rows.push({pid:p.id,name:p.name,color:p.color,vote:v?'yes':'no',seats:p.seats});
+    }
+    const passRate=yes/tot;
+    if(!this.amendLog) this.amendLog=[];
+    if(passRate < need){
+      this.pushNews(3,'sev2',`<b>개헌안 부결</b> — 의회 찬성 ${(passRate*100).toFixed(0)}% (요건 ${(need*100).toFixed(0)}%), ${label} 무산`);
+      this.chron(`개헌안 의회 부결: ${label} (${(passRate*100).toFixed(0)}%)`);
+      this.S.stability=clamp(this.S.stability-2,0,100);
+      this.amendLog.unshift({y:this.year(), label, stage:'의회', passRate, passed:false, rows});
+      if(this.amendLog.length>40)this.amendLog.pop();
+      return false;
+    }
+    this.amendLog.unshift({y:this.year(), label, stage:'의회', passRate, passed:true, rows});
+    if(this.amendLog.length>40)this.amendLog.pop();
+    if(mode==='flex'){
+      this.pushNews(3,'pos',`<b>개헌안 의회 통과</b> — 찬성 ${(passRate*100).toFixed(0)}%, ${label} 확정`);
+      this._enactAmendment({kind,value,label,payload});
+      return true;
+    }
+    // 2단계: 국민투표 (경성 헌법)
+    const axis = this._refAxis(kind, value);
+    this.referendum={kind, value, label, payload, at:this.tick+9, axis, poll:[], parlRate:passRate};
+    this.pushNews(4,'sev3',`<b>개헌 국민투표 발의</b> — 의회 통과(${(passRate*100).toFixed(0)}%), ${label} · 9개월 뒤 국민투표`);
+    this.chron(`개헌 국민투표 발의: ${label}`);
+    return true;
+  }
+  // 의제별 균열축: 매번 다른 균열이 나타난다 (브렉시트형)
+  _refAxis(kind, value){
+    if(kind==='form') return {edu:-0.35, age:0.30, open:-0.30, trib:0.35};   // 체제 변경: 학력·연령 균열
+    if(kind==='sys')  return {polInt:0.40, open:0.25, trust:-0.20};          // 선거제도: 정치관심 균열
+    return {open:0.30, trib:-0.20};
+  }
+  _enactAmendment(R){
+    if(R.kind==='sys') this.con.method=R.value;
+    else if(R.kind==='form'){ this.govForm=R.value; this.president=null; this.monarch=null; this.king=null; this.gridlock=false; this.ensureKing(); }
+    else if(R.kind==='full' && R.payload){ Object.assign(this.con, R.payload); }
+    this.pushNews(4,'pos',`<b>개헌 공포</b> — ${R.label}`);
+    this.chron(`개헌 공포: ${R.label}`);
+  }
+  // 국민투표 찬성 확률: 의제별 균열축을 따라 갈린다
+  _refYesP(i, R){
+    const ax=R.axis||{}, ruling=new Set(this.govCoalition);
+    let p = 0.46;                                   // 현상유지 편향
+    p += this.openness[i]*(ax.open??0.22);
+    p -= this.conformity[i]*0.20;
+    p += (this.education[i]-0.5)*(ax.edu??0);
+    p += ((this.age[i]-45)/40)*(ax.age??0);
+    p += (this.tribalism[i]-0.5)*(ax.trib??0);
+    p += (this.polInterest[i]-0.5)*(ax.polInt??0);
+    p += (this.trust[i]-0.5)*(ax.trust??0.12);
+    const pid=this.party[i];
+    if(pid>=0) p += ruling.has(pid)? 0.20 : -0.10;
+    return clamp(p);
   }
   stepReferendum(){
-    const R=this.referendum;
-    if(!R || this.tick<R.at) return;
+    const R=this.referendum; if(!R) return;
+    // ── 캠페인 기간: 매 틱 여론 조사 ──
+    if(this.tick<R.at){
+      if(this.tick%3===0){
+        let y=0,t=0;
+        for(let i=0;i<N;i+=6){ if(this.age[i]<this.con.voteAge)continue;
+          t++; if(rnd()<this._refYesP(i,R)) y++; }
+        const pct=t? y/t*100 : 50;
+        R.poll.push(+ (pct+gauss(0,1.5)).toFixed(1));
+        if(R.poll.length>40) R.poll.shift();
+      }
+      return;
+    }
+    // ── 투표일 ──
     const ruling=new Set(this.govCoalition);
     let yes=0, tot=0;
+    const regY=new Array(NREG).fill(0), regT=new Array(NREG).fill(0);
+    const grpY={young:0,old:0,hiEdu:0,loEdu:0}, grpT={young:0,old:0,hiEdu:0,loEdu:0};
     for(let i=0;i<N;i++){
-      if(this.age[i]<18) continue;
-      if(rnd()>clamp(0.3+this.polInterest[i]*0.5)) continue;   // 투표 참여
-      // 찬성 성향: 개방성↑ 동조(현상유지)↓ 여당 지지자↑ 신뢰↑
-      // 현상유지 편향이 기본: 정부 인기와 개방성이 이를 넘어야 가결
-      const partisan=this.party[i]>=0;
-      const p=0.43 + this.openness[i]*0.22 - this.conformity[i]*0.22
-        + (partisan? (ruling.has(this.party[i])?0.24:-0.11) : 0.03)
-        + (this.trust[i]-0.5)*0.12;
-      if(rnd()<clamp(p)) yes++;
-      tot++;
+      if(this.age[i]<this.con.voteAge) continue;
+      // 투표율: 정치 관심 + 의제 현저성
+      if(rnd()>clamp(0.35+this.polInterest[i]*0.55)) continue;
+      const v = rnd()<this._refYesP(i,R);
+      if(v) yes++; tot++;
+      const r=this.region[i]; regT[r]++; if(v)regY[r]++;
+      if(this.age[i]<40){ grpT.young++; if(v)grpY.young++; } else { grpT.old++; if(v)grpY.old++; }
+      if(this.education[i]>0.55){ grpT.hiEdu++; if(v)grpY.hiEdu++; } else { grpT.loEdu++; if(v)grpY.loEdu++; }
     }
-    const pct=clamp(yes/Math.max(tot,1)*100+gauss(0,1.2),0,100);
-    if(pct>50){
-      if(R.kind==='sys') this.con.method=R.value;
-      else { this.govForm=R.value; this.president=null; this.monarch=null; this.king=null; this.gridlock=false; this.ensureKing(); }
-      this.pushNews(3,'pos',`<b>국민투표 가결</b> — 찬성 ${pct.toFixed(1)}%, ${R.label} 개헌 확정`);
-      this.chron(`국민투표 가결: ${R.label} (찬성 ${pct.toFixed(0)}%)`);
+    const pct=clamp(yes/Math.max(tot,1)*100,0,100);
+    const turnout=tot/Math.max(1,this._adultCount());
+    const passed=pct>50;
+    // 지역별 결과
+    const regRes=regT.map((t,r)=>({r, pct: t? regY[r]/t*100 : 50, t}));
+    const rec={ y:this.year(), label:R.label, pct, turnout:turnout*100, passed,
+      regions:regRes, groups:{
+        young: grpT.young? grpY.young/grpT.young*100:50, old: grpT.old? grpY.old/grpT.old*100:50,
+        hiEdu: grpT.hiEdu? grpY.hiEdu/grpT.hiEdu*100:50, loEdu: grpT.loEdu? grpY.loEdu/grpT.loEdu*100:50 },
+      poll:(R.poll||[]).slice(), parlRate:R.parlRate };
+    if(!this.refRecords) this.refRecords=[];
+    this.refRecords.unshift(rec); if(this.refRecords.length>30)this.refRecords.pop();
+    if(passed){
+      this._enactAmendment(R);
+      this.pushNews(4,'pos',`<b>국민투표 가결</b> — 찬성 ${pct.toFixed(1)}% (투표율 ${(turnout*100).toFixed(0)}%), ${R.label} 확정`);
+      this.chron(`국민투표 가결: ${R.label} (${pct.toFixed(0)}%)`);
+      // 근소한 차이 → 정당성 위기
+      if(pct<55){
+        this.pushNews(3,'sev2',`근소한 차이로 갈린 결과 — <b>정당성 논란</b>과 재투표 요구가 이어진다`);
+        this.chron(`국민투표 정당성 논란 (${pct.toFixed(1)}%)`);
+        this.S.stability=clamp(this.S.stability-5,0,100);
+        this.S.polarization=clamp(this.S.polarization+6,0,100);
+      }
+      // 지역별 분열 → 분리 압력 (스코틀랜드 모델)
+      if(this.stateGrievance) for(const rr of regRes){
+        if(rr.t>0 && (rr.pct<45) !== (pct<45) && Math.abs(rr.pct-pct)>12)
+          this.stateGrievance[rr.r]=clamp(this.stateGrievance[rr.r]+0.14,0,1);
+      }
     } else {
-      this.pushNews(3,'sev2',`<b>국민투표 부결</b> — 찬성 ${pct.toFixed(1)}%, ${R.label} 개헌 무산`);
-      this.chron(`국민투표 부결: ${R.label}`);
-      this.S.stability=clamp(this.S.stability-3,0,100);   // 정부 타격
+      this.pushNews(4,'sev3',`<b>국민투표 부결</b> — 찬성 ${pct.toFixed(1)}% (투표율 ${(turnout*100).toFixed(0)}%), ${R.label} 무산`);
+      this.chron(`국민투표 부결: ${R.label} (${pct.toFixed(0)}%)`);
+      this.S.stability=clamp(this.S.stability-7,0,100);
+      // 발의한 정부 지도자 사퇴 압력
+      const lead=this.parties.find(p=>p.id===this.govCoalition[0]);
+      if(lead && lead.leader && rnd()<0.45){
+        this.pushNews(4,'sev3',`<b>${lead.leader.name}</b>, 국민투표 패배 책임지고 사퇴`);
+        this.chron(`${lead.leader.name} 국민투표 패배 사퇴`);
+        lead.leader.falls=(lead.leader.falls||0)+1;
+        if(lead.leader.office==='pres') this.president=null;
+        lead.leader.office=null; lead.leader.retired=true; lead.leader=null;
+      }
     }
     this.referendum=null;
   }
+  _adultCount(){ let c=0; for(let i=0;i<N;i++) if(this.age[i]>=this.con.voteAge)c++; return c; }
   // 지역구 획정: 지역 인구 비례 배분 + 지역 내 자산·교육 정렬 분할(도심/외곽 계급 분리 효과)
   assignDistricts(nd){
     const pop=new Array(NREG).fill(0);
@@ -2882,6 +3406,7 @@ class Sim {
           const allies=ranked.filter(p=>p.id!==win.id).sort((a,b)=>this.partyDist(win.cent,a)-this.partyDist(win.cent,b));
           for(const o of allies){ if(seats>maj)break; const dd=this.partyDist(win.cent,o);
             if(dd<1.7 && rnd()<0.85-dd*0.35){ this.govCoalition.push(o.id); seats+=o.seats; } }
+          if(seats<=maj) seats = this._seekConfidenceSupply(win, ranked, seats, maj);
           this.gridlock=seats<=maj;
           if(this.gridlock) this.pushNews(2,'sev2','<b>여소야대</b> — 의회 다수가 야권, 국정 교착 전망');
         }
@@ -2889,7 +3414,9 @@ class Sim {
         // 이원집정부제: 의회 다수가 총리(내각) 구성. 대통령 정당과 다르면 동거정부
         seats=lead.seats; this.govCoalition.push(lead.id);
         const others=ranked.filter(p=>p!==lead).sort((a,b)=>this.partyDist(lead.cent,a)-this.partyDist(lead.cent,b));
-        for(const o of others){ if(seats>maj)break; if(this.partyDist(lead.cent,o)<2.4){ this.govCoalition.push(o.id); seats+=o.seats; } }
+        for(const o of others){ if(seats>maj)break; const dd=this.partyDist(lead.cent,o);
+          if(dd<2.4 && rnd() < 0.92 - dd*0.30){ this.govCoalition.push(o.id); seats+=o.seats; } }
+        if(seats<=maj) seats = this._seekConfidenceSupply(lead, ranked, seats, maj);
         const pres=this.president && this.parties.find(p=>p.id===this.president.pid);
         this.cohabitation = pres && !this.govCoalition.includes(pres.id);
         this.gridlock=false;
@@ -2899,7 +3426,11 @@ class Sim {
         if(F==='MONARCH' && this.monarch){ const mp=ranked.find(p=>p.id===this.monarch.pid); if(mp && mp.seats>=ranked[0].seats*0.8) lead=mp; }
         seats=lead.seats; this.govCoalition.push(lead.id);
         const others=ranked.filter(p=>p!==lead).sort((a,b)=>this.partyDist(lead.cent,a)-this.partyDist(lead.cent,b));
-        for(const o of others){ if(seats>maj)break; if(this.partyDist(lead.cent,o)<2.4){ this.govCoalition.push(o.id); seats+=o.seats; } }
+        for(const o of others){ if(seats>maj)break; const dd=this.partyDist(lead.cent,o);
+          // 이념 거리가 멀수록 입각 협상이 깨진다(현실의 조각 실패)
+          if(dd<2.4 && rnd() < 0.92 - dd*0.30){ this.govCoalition.push(o.id); seats+=o.seats; } }
+        // ── 신임과 공급: 과반 미달 시 각외 협력 파트너를 구한다 ──
+        if(seats<=maj) seats = this._seekConfidenceSupply(lead, ranked, seats, maj);
         this.gridlock=false;
       }
       if(this.govForm==='MONARCH' && !this.monarch){
@@ -2907,7 +3438,20 @@ class Sim {
         this.pushNews(3,'norm',`의회, <b>${mp.name}</b> 추대 후보를 국왕으로 선출 — 대관식 거행`); this.chron(`국왕 선출 (${mp.name} 추대)`);
       }
       const changed=oldGov[0]!==this.govCoalition[0];
-      if(changed)this.govSince=this.tick;
+      if(changed){
+        this.govSince=this.tick;
+        // 서사용 맥락 캡처: 왜 정권이 바뀌었나
+        const oldP=this.parties.find(p=>p.id===oldGov[0]);
+        let retroAvg=0,rn=0;
+        for(let i=0;i<N;i+=4){ if(this.age[i]<18)continue; retroAvg+=this.retroEval[i]; rn++; }
+        retroAvg = rn? retroAvg/rn : 0;
+        const recentScandal = this.chronicle.slice(0,10).some(c=>/사퇴|의혹|파동/.test(c.t));
+        if(!this.turnovers) this.turnovers=[];
+        this.turnovers.unshift({ y:this.year(), from:oldP?oldP.name:'', to:lead.name,
+          unemp:this.S.unemployment, growth:this.S.gdpGrowth, retro:retroAvg,
+          scandal:recentScandal, seatSwing: lead.seats-(oldP?oldP.seats:0) });
+        if(this.turnovers.length>40) this.turnovers.pop();
+      }
       this.chron(`총선(${METHODNAME[C.method]}): ${lead.name} 제1당 (${lead.seats}석)${changed?' — 정권 교체':''}`);
       if(changed && oldGov.length)this.pushNews(3,'sev2',`<b>정권 교체</b> — ${lead.name} 주도 정부 출범`);
       if(seats<=maj){ this.pushNews(2,'sev2','과반 연정 구성 실패 — 소수 정부 출범, 정국 불안'); S.stability=clamp(S.stability-6,0,100); }
@@ -3420,7 +3964,12 @@ class Sim {
     const big=ms[0], totS=ms.reduce((x,p)=>x+Math.max(p.support,0.001),0)||1;
     const cent=new Float64Array(6);
     for(const p of ms){ const w=Math.max(p.support,0.001)/totS; for(let k=0;k<6;k++)cent[k]+=p.cent[k]*w; }
-    const name=a.name.replace(/\s*연대$/,'').slice(0,14)+'당';
+    // B: 합당은 연합명을 물려받지 않고, 통합된 이념 좌표로 새 이름을 생성한다
+    const usedN=new Set(this.parties.filter(p=>p.id>=0&&!a.members.includes(p.id)).map(p=>p.name));
+    let name; let tryN=0;
+    do { name=this._normPartyName(this.nameParty(cent, ms.reduce((x,p)=>x+p.rad,0)/ms.length).name); tryN++; }
+    while(usedN.has(name) && tryN<8);
+    if(usedN.has(name)) name=this._normPartyName('통합'+name);
     const np={ id:this.nextPartyId++, name, slogan:ms.map(p=>p.slogan).find(Boolean)||'하나로',
       color:big.color, cent, rad:ms.reduce((x,p)=>x+p.rad,0)/ms.length, support:0, seats:0,
       founded:this.year(), lowStreak:0, home:big.home, factions:null, leader:a.leader||big.leader||null };
@@ -3681,7 +4230,7 @@ class Sim {
       fair:this.electionFair, unrest:this.unrest, S:this.S,
       elections:this.elections, govSince:this.govSince,
       form:this.govForm, pres:this.president, mon:this.monarch, king:this.king, cohab:this.cohabitation, grid:this.gridlock, lastAct:this.lastAct,
-      refr:this.referendum, maxP:this.maxParties, plock:this.partyLock, rlock:this.regimeLock,
+      refr:this.referendum, rigidity:this.rigidity, amendSuper:this.amendSuper, refRecords:(this.refRecords||[]).slice(0,20), amendLog:(this.amendLog||[]).slice(0,20), maxP:this.maxParties, plock:this.partyLock, rlock:this.regimeLock,
       indep:this.independents, allies:this.alliances.map(a=>Object.assign({},a,{leader:undefined,leaderLid:a.leader?a.leader.lid:null})), nextAllyId:this.nextAllyId, autoAlly:this.autoAlliance, facOn:this.factionsOn, facTen:this.factionTension, blocsOn:this.blocsOn, blocs:this.blocs, B:this.B, preset:this.preset||'balanced',
       regio:this.regionalism, regC:this.regCount, con:this.con, senate:this.senate, senClass:this.senateClass,
       country:this.country, partyLog:this.partyLog, lastFound:this.lastFound,
@@ -3696,7 +4245,8 @@ class Sim {
       localGovOn:this.localGovOn, lastLocalElec:this.lastLocalElec,
       governors:(this.governors||[]).map(g=>g?{region:g.region,partyID:g.partyID,color:g.color,pname:g.pname,lid:g.leader?g.leader.lid:null,since:g.since,margin:g.margin}:null),
       localSeatsPer:this.localSeatsPer, federalPower:this.federalPower, fiscalTransfer:this.fiscalTransfer, activistPull:this.activistPull,
-      colorMode:this.colorMode, colorConvention:this.colorConvention, allyMaxLR:this.allyMaxLR,
+      colorMode:this.colorMode, colorConvention:this.colorConvention, allyMaxLR:this.allyMaxLR, retroWeight:this.retroWeight,
+      issuesOn:this.issuesOn, issues:this.issues, voteRecords:(this.voteRecords||[]).slice(0,60), confSupply:this.confSupply, turnovers:(this.turnovers||[]).slice(0,40), pinnedCitizen:this.pinnedCitizen, pinLog:this.pinLog,
       districtResults:(this.districtResults||[]).slice(0,300),
       leaderContests:(this.leaderContests||[]).slice(0,150),
       partyNominees:this.parties.filter(p=>p.id>=0&&p.nominees).map(p=>({id:p.id,nominees:p.nominees})),
@@ -3708,7 +4258,7 @@ class Sim {
          resentment:arr(this.resentment),trust:arr(this.trust),aggression:arr(this.aggression),
          polInterest:arr(this.polInterest),radical:arr(this.radical),
          region:arr(this.region),culture:arr(this.culture),party:arr(this.party),loyalty:arr(this.loyalty),
-         adaptCost:arr(this.adaptCost),partyID:arr(this.partyID)},
+         adaptCost:arr(this.adaptCost),partyID:arr(this.partyID),retroEval:arr(this.retroEval)},
     });
   }
   static deserialize(json){
@@ -3720,7 +4270,7 @@ class Sim {
     s.nextPartyId=d.nextPartyId; s.govCoalition=d.gov; s.lastElection=d.lastElection; s.lastSenate=d.lastSenate??-999;
     s.elections=d.elections||[]; s.govSince=d.govSince||0;
     s.govForm=d.form||'PARL'; s.president=d.pres||null; s.monarch=d.mon||null; s.king=d.king||null; s.cohabitation=!!d.cohab; s.gridlock=!!d.grid;
-    s.lastAct=d.lastAct??-99; s.country=d.country||'신생 공화국'; s.referendum=d.refr||null;
+    s.lastAct=d.lastAct??-99; s.country=d.country||'신생 공화국'; s.referendum=d.refr||null; if(d.rigidity)s.rigidity=d.rigidity; if(d.amendSuper)s.amendSuper=d.amendSuper; s.refRecords=d.refRecords||[]; s.amendLog=d.amendLog||[];
     s.maxParties=d.maxP||7; s.partyLock=!!d.plock; s.regimeLock=!!d.rlock;
     s.alliances=d.allies||[]; s.nextAllyId=d.nextAllyId||1;
     s._allyRelink=true; if(d.autoAlly!==undefined)s.autoAlliance=d.autoAlly;
@@ -3739,6 +4289,8 @@ class Sim {
     s.localSeatsPer=d.localSeatsPer||15;
     if(d.activistPull!==undefined)s.activistPull=d.activistPull;
     if(d.allyMaxLR!==undefined)s.allyMaxLR=d.allyMaxLR;
+    if(d.retroWeight!==undefined)s.retroWeight=d.retroWeight;
+    if(d.issuesOn!==undefined)s.issuesOn=d.issuesOn; s.issues=d.issues||[]; s.voteRecords=d.voteRecords||[]; s.confSupply=d.confSupply||[]; s.turnovers=d.turnovers||[]; s.pinnedCitizen=d.pinnedCitizen??-1; s.pinLog=d.pinLog||[];
     if(d.colorMode)s.colorMode=d.colorMode; if(d.colorConvention)s.colorConvention=d.colorConvention;
     s.districtResults=d.districtResults||[];
     s.leaderContests=d.leaderContests||[];
@@ -3808,7 +4360,7 @@ const UI={
       this.render(true);
     };
     $('#maxPm').onclick=()=>{ this.sim.maxParties=Math.max(2,this.sim.maxParties-1); this.render(true); };
-    $('#maxPp').onclick=()=>{ this.sim.maxParties=Math.min(12,this.sim.maxParties+1); this.render(true); };
+    $('#maxPp').onclick=()=>{ this.sim.maxParties=Math.min(30,this.sim.maxParties+1); this.render(true); };
     $('#btnAlly').onclick=()=>{ const r=$('#allyRow'); r.style.display= r.style.display==='none'?'block':'none'; if(r.style.display==='block')this.renderAllyPicker(); };
     // ── 의회 뷰 전환 칩 ──
     this.parlView='party'; this.axisMode='pca';
@@ -3824,12 +4376,16 @@ const UI={
       document.querySelectorAll('[data-map]').forEach(c=>c.classList.toggle('sel',c===m));
       this.renderMap();
     });
-    document.addEventListener('input',e=>{ if(e.target.id==='actPullSl'){ this.sim.activistPull=+e.target.value/100;
+    document.addEventListener('input',e=>{ if(e.target.id==='retroSl'){ this.sim.retroWeight=+e.target.value/100;
+        $('#retroV').textContent=(+e.target.value/100).toFixed(1)+'×'; }
+      if(e.target.id==='actPullSl'){ this.sim.activistPull=+e.target.value/100;
         $('#actPullV').textContent=e.target.value+'%'; }
       if(e.target.id==='allyLRSl'){ this.sim.allyMaxLR=+e.target.value/100; $('#allyLRV').textContent=(+e.target.value/100).toFixed(1); }
       if(e.target.id==='fedPowSl'){ this.sim.federalPower=+e.target.value/100;
       $('#fedPowV').textContent=e.target.value+'%'; } });
-    document.addEventListener('change',e=>{ if(e.target.id==='fiscalTog'){ this.sim.fiscalTransfer=e.target.checked; }
+    document.addEventListener('change',e=>{ if(e.target.id==='issueTog'){ this.sim.issuesOn=e.target.checked;
+        this.sim.pushNews(1,'norm', e.target.checked?'<b>쟁점 정치</b> 활성 — 구체적 사안이 표심을 가른다':'쟁점 정치 비활성'); this.render(true); }
+      if(e.target.id==='fiscalTog'){ this.sim.fiscalTransfer=e.target.checked; }
       if(e.target.id==='localGovTog'){ this.sim.localGovOn=e.target.checked;
       if(e.target.checked){ this.sim._runGovernorElections(); this.sim.pushNews(1,'norm','<b>지방정부 도입</b> — 각 주에서 주지사를 선출한다'); }
       else this.sim.pushNews(1,'norm','지방정부 폐지 — 중앙집권 체제로');
@@ -3858,6 +4414,10 @@ const UI={
       if(e.target.id==='distMore'){ this.distShown=(this.distShown||25)+25; this.renderDistricts(); return; }
     });
     if($('#distPartyFilt')) $('#distPartyFilt').onchange=()=>{ this.distShown=25; this.renderDistricts(); };
+    document.addEventListener('click',e=>{
+      if(e.target.id==='citPick'){ this._citIdx=this.sim.randomCitizen(); this.renderCitizen(); return; }
+      if(e.target.id==='citPin'){ if(this._citIdx>=0){ this.sim.pinCitizen(this._citIdx); this.renderCitizen(); } return; }
+    });
     // ── 역사 뷰 전환 ──
     this.histView='events';
     document.addEventListener('click',e=>{ const h=e.target.closest('.viewChip[data-hview]'); if(!h)return;
@@ -3937,6 +4497,10 @@ const UI={
       if(sp){ this.openSplit(+sp.dataset.split); return; }
       const b=e.target.closest('.banBtn[data-ban]');
       if(b){ this.sim.banParty(+b.dataset.ban); this.render(true); return; }
+      const pd=e.target.closest('[data-pdet]');
+      if(pd){ this.showParty(+pd.dataset.pdet); return; }
+      if(e.target.closest('#psMore')){ this._psExpand=true; this.renderParties(); return; }
+      if(e.target.closest('#psLess')){ this._psExpand=false; this.renderParties(); return; }
       // 계파 접기/펼치기 (아코디언)
       const row=e.target.closest('.party[data-pid]'); if(!row)return;
       const pid=+row.dataset.pid;
@@ -4167,12 +4731,19 @@ const UI={
         // 프리셋 + 정당 구도 리셋: 제도·정당을 한 번에 적용
         this.sim.applyPresetNation(this._draftPresetKey, true);
         this._draftPresetKey=null;
-      } else {
+      } else if((this.sim.rigidity||'rigid')==='free'){
         if(this._draftForm!==this.sim.govForm){
           this.sim.govForm=this._draftForm; this.sim.president=null; this.sim.monarch=null; this.sim.king=null;
           this.sim.gridlock=false; this.sim.cohabitation=false; this.sim.ensureKing();
         }
         this.sim.applyConstitution(this._draft);
+      } else {
+        // 절차를 거치는 개헌: 의회 → (경성이면) 국민투표
+        const formChanged=this._draftForm!==this.sim.govForm;
+        const label = formChanged? FORMNAME[this._draftForm]+' 전환' : '헌법 개정안';
+        const payload=JSON.parse(JSON.stringify(this._draft));
+        if(formChanged) this.sim.propose('form', this._draftForm, label, payload);
+        else this.sim.propose('full', null, label, payload);
       }
       $('#constPage').classList.remove('show'); this.paused=this._cPrev; this._parlKey=''; this.render(true);
     };
@@ -4244,20 +4815,20 @@ const UI={
     ap.style.color= !gp.length?'var(--tx3)': appr>=45?'#9dff5a': appr>=28?'var(--am)':'#ff5a7a';
 
     const page=document.querySelector('.page.active').id;
-    if(page==='page-dash'){ this.renderKPIs(); this.renderHeadline(); 
+    if(page==='page-dash'){ this.renderKPIs(); this.renderHeadline(); this.renderDemoHealth(); this.renderReferendum(); 
       drawLine($('#chGdp'),s.hist.gdp,'#54e0ff');
       drawLine($('#chUnemp'),s.hist.unemp,'#ff5ad1');
       drawLine($('#chInfl'),s.hist.infl,'#ffc14d');
       drawLine($('#chDem'),s.hist.dem,'#9dff5a',0,100);
     }
-    if(page==='page-pol'){ this.renderParliament(); this.renderParties(); this.renderPoll(); this.renderAnalysis(); this.renderDistricts(); }
+    if(page==='page-pol'){ this.renderParliament(); this.renderParties(); this.renderPoll(); this.renderAnalysis(); this.renderDistricts(); this.renderIssues(); }
     if(page==='page-soc'){ this.renderGauges();
       drawMulti($('#chPolz'),[
         {data:s.hist.polz,color:'#ff5ad1',label:'양극화'},
         {data:s.hist.trust,color:'#54e0ff',label:'체제신뢰'},
         {data:s.hist.rad,color:'#ff6262',label:'급진화'}],0,100);
       drawLine($('#chGen'),s.hist.gen,'#9dff5a',0,100);
-      this.renderPyramid(); this.renderWealth(); this.renderScatter();
+      this.renderPyramid(); this.renderWealth(); this.renderScatter(); this.renderCitizen();
     }
     if(page==='page-map'){ this.renderMap(); this.renderRegSup(); this.renderRegTraits(); this.renderGovPanel(); this.syncRegio(); }
     if(page==='page-hist') this.renderHistView();
@@ -4336,18 +4907,19 @@ const UI={
   },
 
   buildGauges(){
-    $('#socGauges').innerHTML=['불평등(지니)','범죄율','주거비','도시화','언론자유','사회 갈등','소요 수준'].map((l,i)=>
+    $('#socGauges').innerHTML=['불평등(지니)','범죄율','주거비','도시화','언론자유','사회 갈등','소요 수준','이주율','기술성장','선거 공정성'].map((l,i)=>
       `<div class="gauge"><div class="gl"><span>${l}</span><b id="sg${i}"></b></div><div class="gbar"><i id="sgb${i}"></i></div></div>`).join('');
-    $('#psyGauges').innerHTML=['공포','박탈감','동조','개방성','집단정체성','체제신뢰','급진화','정치관심'].map((l,i)=>
+    $('#psyGauges').innerHTML=['공포','박탈감','동조','개방성','집단정체성','체제신뢰','급진화','정치관심','고용안정','계층이동성','기술적응난'].map((l,i)=>
       `<div class="gauge"><div class="gl"><span>${l}</span><b id="pg${i}"></b></div><div class="gbar"><i id="pgb${i}"></i></div></div>`).join('');
   },
   renderGauges(){
     const s=this.sim,S=s.S;
     const soc=[S.inequality*100,S.crime,S.housingCost,S.urbanization,S.mediaFreedom,
-      s.hist.conflict[s.hist.conflict.length-1]||0, s.unrest];
+      s.hist.conflict[s.hist.conflict.length-1]||0, s.unrest,
+      (S.migration||0)*100, (S.technologyGrowth||0)*50, (s.electionFair??1)*100];
     soc.forEach((v,i)=>{$('#sg'+i).textContent=v.toFixed(0);$('#sgb'+i).style.width=clamp(v,0,100)+'%';});
-    const psy=['fear','resentment','conformity','openness','tribalism','trust','radical','polInterest'];
-    psy.forEach((f,i)=>{const v=s.mean(f)*100;$('#pg'+i).textContent=v.toFixed(0);$('#pgb'+i).style.width=v+'%';});
+    const psy=['fear','resentment','conformity','openness','tribalism','trust','radical','polInterest','jobSec','mobility','adaptCost'];
+    psy.forEach((f,i)=>{const v=s.mean(f)*100;const el=$('#pg'+i);if(!el)return;el.textContent=v.toFixed(0);$('#pgb'+i).style.width=clamp(v,0,100)+'%';});
   },
 
   // ── 의회 반원 ──
@@ -4367,8 +4939,7 @@ const UI={
       document.querySelectorAll('#parlViewBar .viewChip').forEach(c=>c.classList.toggle('sel', c.dataset.view==='party'));
     }
     // 좌↔우 고정 이념축 정렬 — 선거(의석 변경) 시에만 재배치
-    const ps=[...s.parties].filter(p=>p.seats>0)
-      .sort((a,b)=>s.lr(a.cent)-s.lr(b.cent));
+    const ps=s.stableLROrder().filter(p=>p.seats>0);
     const key=s.elections.length+'|'+ps.map(p=>p.id+':'+p.seats+':'+p.color).join(',');
     const stale=key!==this._parlKey;
     const seats=[];
@@ -4489,8 +5060,11 @@ const UI={
     const LS=s.con.lowerSeats; $('#seatTotal').textContent=LS+'석'+(s.con.senate!=='NONE'?` +상원 ${s.senate.reduce((a,x)=>a+x.seats,0)}`:'');
     const gov=s.govCoalition.map(id=>s.parties.find(p=>p.id===id)).filter(Boolean);
     const gs=gov.reduce((a,p)=>a+p.seats,0);
+    const cs=(s.confSupply||[]).map(id=>s.parties.find(p=>p.id===id)).filter(Boolean);
+    const csSeats=cs.reduce((a,p)=>a+(p.seats||0),0);
     $('#govInfo').innerHTML= gov.length
       ? `집권: ${gov.map(p=>`<span style="color:${p.color}">${p.name}</span>`).join(' + ')} (${gs}석)`
+        + (cs.length? `<div style="font-size:10.5px;color:var(--tx3);margin-top:3px">각외 협력(신임과 공급): ${cs.map(p=>`<span style="color:${p.color}">${p.name}</span>`).join(', ')} +${csSeats}석</div>`:'')
       : '집권 세력 없음 — 정당 형성 대기 중';
     // 여/야 의석 바 (가운데 눈금 = 과반 150석)
     const occupied=s.parties.reduce((a,p)=>a+p.seats,0);
@@ -4682,6 +5256,98 @@ const UI={
     </div>`;
     this._modal(`지역구 상세`, html);
   },
+  renderIssues(){
+    const s=this.sim, host=$('#issueBody'); if(!host)return;
+    if($('#issueTog')) $('#issueTog').checked=s.issuesOn;
+    if($('#retroSl')){ $('#retroSl').value=Math.round((s.retroWeight??1)*100); $('#retroV').textContent=((s.retroWeight??1)).toFixed(1)+'×'; }
+    if(!s.issuesOn){ host.innerHTML='<div class="muted" style="font-size:11px">쟁점 정치가 꺼져 있다 — 정당 대립이 이념 위치로만 표현된다.</div>'; return; }
+    const its=(s.issues||[]).slice().sort((a,b)=>b.sal-a.sal);
+    if(!its.length){ host.innerHTML='<div class="muted" style="font-size:11px">지금은 정국을 가르는 큰 쟁점이 없다.</div>'; return; }
+    host.innerHTML=its.map(it=>{
+      const ps=s.parties.filter(p=>p.id>=0&&p.support>0.02);
+      const dots=ps.map(p=>{ const st=s.issueStance(p,it);
+        return `<div title="${p.name} ${st>0?'찬성':'반대'} ${Math.abs(st).toFixed(2)}" style="position:absolute;left:${(st+1)/2*100}%;top:50%;transform:translate(-50%,-50%);width:9px;height:9px;border-radius:50%;background:${p.color};border:1px solid rgba(0,0,0,0.4)"></div>`;
+      }).join('');
+      const c=it.sal>0.6?'var(--rd)':it.sal>0.3?'var(--am)':'var(--tx3)';
+      return `<div style="margin-bottom:11px">
+        <div style="display:flex;align-items:center;gap:8px;font-size:11.5px;margin-bottom:4px">
+          <b style="color:var(--tx)">${it.name}</b>
+          <span style="font-family:var(--mono);font-size:10px;color:${c}">현저성 ${(it.sal*100|0)}%</span>
+          <span style="margin-left:auto;font-size:9.5px;color:var(--tx3)">${it.born}년 부상</span></div>
+        <div style="position:relative;height:20px;border-radius:6px;background:linear-gradient(90deg,rgba(255,107,90,0.12),rgba(120,140,180,0.05) 50%,rgba(90,224,180,0.12))">
+          <div style="position:absolute;left:50%;top:3px;bottom:3px;width:1px;background:rgba(180,200,240,0.2)"></div>${dots}</div>
+        <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--tx3);margin-top:2px"><span>반대</span><span>찬성</span></div>
+      </div>`;
+    }).join('');
+    // ── 법안 표결 이력 ──
+    const vh=$('#voteHistory'); if(!vh)return;
+    const vrs=(s.voteRecords||[]).slice(0,8);
+    if(!vrs.length){ vh.innerHTML='<div class="muted" style="font-size:10.5px">아직 처리된 법안이 없다 — 쟁점이 무르익으면 의회에 상정된다.</div>'; return; }
+    vh.innerHTML='<div style="font-size:10px;color:var(--tx3);letter-spacing:1px;margin-bottom:7px">법안 표결 이력 — 누르면 정당별 찬반</div>'+
+      vrs.map((v,i)=>`<div data-vote="${i}" style="display:flex;align-items:center;gap:8px;font-size:11px;padding:4px 0;border-bottom:1px solid rgba(130,170,255,0.06);cursor:pointer">
+        <span style="font-family:var(--mono);font-size:10px;color:var(--cy);min-width:38px">${v.y}년</span>
+        <span style="flex:1">${v.bill}</span>
+        <span style="font-family:var(--mono);font-size:10px;color:var(--tx3)">${v.yes}·${v.no}</span>
+        <span style="font-size:10px;color:${v.passed?'#5ae0b4':'var(--rd)'}">${v.passed?'가결':'부결'}</span>
+      </div>`).join('');
+    vh.onclick=e=>{ const r=e.target.closest('[data-vote]'); if(!r)return; this.showVote(+r.dataset.vote); };
+  },
+  showVote(idx){
+    const s=this.sim, v=(s.voteRecords||[])[idx]; if(!v)return;
+    const vlab={yes:'찬성',no:'반대',abst:'기권'}, vcol={yes:'#5ae0b4',no:'#ff6262',abst:'#8fa3c8'};
+    const rows=v.rows.slice().sort((a,b)=>b.seats-a.seats).map(r=>
+      `<div style="display:flex;align-items:center;gap:8px;font-size:11.5px;padding:4px 0;border-bottom:1px solid rgba(130,170,255,0.06)">
+        <div class="pdot" style="background:${r.color}"></div>
+        <span style="flex:1">${r.name}</span>
+        <span style="font-family:var(--mono);font-size:10px;color:var(--tx3)">${r.seats}석</span>
+        <span style="color:${vcol[r.vote]};min-width:30px;text-align:right">${vlab[r.vote]}</span>
+        ${r.defect?`<span style="font-size:9.5px;color:var(--am)">이탈 ${r.defect}</span>`:'<span style="width:44px"></span>'}
+      </div>`).join('');
+    const html=`<div style="font-size:12px;color:var(--tx2);line-height:1.8">
+      <b style="color:var(--tx)">${v.bill}</b><br>
+      <span style="font-size:11px;color:var(--tx3)">${v.y}년 · 쟁점: ${v.issueName}</span>
+      <div style="display:flex;gap:10px;margin-top:9px;font-family:var(--mono);font-size:11.5px">
+        <span style="color:#5ae0b4">찬성 ${v.yes}</span><span style="color:#ff6262">반대 ${v.no}</span>
+        <span style="color:#8fa3c8">기권 ${v.abst}</span>
+        <span style="margin-left:auto;font-weight:600;color:${v.passed?'#5ae0b4':'var(--rd)'}">${v.passed?'가결':'부결'}</span></div>
+      <div style="margin-top:12px;border-top:1px solid rgba(130,170,255,0.12);padding-top:9px">${rows}</div>
+      <div style="margin-top:9px;font-size:10.5px;color:var(--tx3)">이탈 = 당론과 다르게 표결한 계파 의석</div>
+    </div>`;
+    this._modal('법안 표결', html);
+  },
+  renderCrossSup(mode){
+    const s=this.sim;
+    const cvId={jobsec:'#chJobSec',mobil:'#chMobil',retro:'#chRetro'}[mode];
+    const cv=$(cvId); if(!cv)return;
+    const ps=s.stableLROrder();
+    const arr = mode==='jobsec'? s.jobSec : mode==='mobil'? s.mobility : s.retroEval;
+    const labs = mode==='retro'
+      ? ['매우 부정','부정','중립','긍정','매우 긍정']
+      : ['최하위','하위','중간','상위','최상위'];
+    const cnt=labs.map(()=>({t:0,n:0}));
+    for(let i=0;i<N;i++){
+      if(s.age[i]<18) continue;
+      let v = arr? arr[i] : 0;
+      if(mode==='retro') v=(v+1)/2;         // -1~1 → 0~1
+      let b=Math.min(4, Math.max(0, Math.floor(clamp(v)*5)));
+      const c=cnt[b]; c.t++;
+      const pid=s.party[i];
+      if(pid<0) c.n++; else c[pid]=(c[pid]||0)+1;
+    }
+    const [g,w,h]=prepCanvas(cv);
+    const rows=labs.length, rh=(h-8)/rows;
+    labs.forEach((lab,r)=>{
+      const tot=cnt[r].t||1; let x=84; const y=6+r*rh;
+      ps.forEach(p=>{ const v=(cnt[r][p.id]||0)/tot*(w-94);
+        if(v>0.5){ g.fillStyle=p.color; g.fillRect(x,y,v,rh-7); x+=v; } });
+      const nv=(cnt[r].n||0)/tot*(w-94);
+      if(nv>0.5){ g.fillStyle='rgba(120,140,180,0.25)'; g.fillRect(x,y,nv,rh-7); }
+      g.fillStyle='rgba(223,233,255,0.85)'; g.font='10px ui-monospace,monospace';
+      g.fillText(lab, 6, y+rh/2+1);
+      g.fillStyle='rgba(143,163,200,0.6)'; g.font='9px ui-monospace,monospace';
+      g.fillText(String(cnt[r].t), w-26, y+rh/2+1);
+    });
+  },
   renderDistricts(){
     const s=this.sim; if(!$('#distBody'))return;
     const DR=s.districtResults;
@@ -4740,12 +5406,15 @@ const UI={
     // 해당 뷰만 표시
     document.querySelectorAll('#analysisPanel [data-av]').forEach(d=>d.style.display= d.dataset.av===v?'':'none');
     const titles={support:'정당 지지율 추이',stack:'지지 구성의 역사 — 민심의 지층',age:'세대별 표심 — 누가 누구를 지지하는가',
-      'class':'학력·자산별 표심',seats:'의석 변천사 — 역대 총선',estat:'선거 동향 — 표심은 의석에 얼마나 닿았나'};
+      'class':'학력·자산별 표심',seats:'의석 변천사 — 역대 총선',estat:'선거 동향 — 표심은 의석에 얼마나 닿았나',
+      jobsec:'고용 안정성별 표심 — 불안이 정치를 가른다',mobil:'계층 이동성 인식별 표심 — 희망과 체념',
+      retro:'정권 평가별 표심 — 심판 성향'};
     const t=$('#analysisTitle'); if(t)t.textContent='표심 분석 — '+(titles[v]||'');
     // 보이는 차트만 렌더 (숨긴 canvas는 width 0이라 렌더 불가)
     if(v==='support') this.renderSupportChart();
     else if(v==='stack') this.renderStack();
     else if(v==='age'||v==='class') this.renderDemoSup();
+    else if(v==='jobsec'||v==='mobil'||v==='retro') this.renderCrossSup(v);
     else if(v==='seats'||v==='estat') this.renderElectoral();
   },
   renderStack(){
@@ -4815,7 +5484,7 @@ const UI={
   // ── 세대별 표심: 연령대 × 정당 누적 가로 막대 ──
   renderDemoSup(){
     const s=this.sim;
-    const ps=[...s.parties].sort((a,b)=>s.lr(a.cent)-s.lr(b.cent));
+    const ps=s.stableLROrder();
     const stacked=(cv, groups, counts)=>{
       const [g,w,h]=prepCanvas(cv);
       const rows=groups.length, rh=(h-8)/rows;
@@ -4894,7 +5563,7 @@ const UI={
   },
   renderRegSup(){
     const s=this.sim, cv=$('#chRegSup'); const [g,w,h]=prepCanvas(cv);
-    const ps=[...s.parties].sort((a,b)=>s.lr(a.cent)-s.lr(b.cent));
+    const ps=s.stableLROrder();
     const cnt=Array.from({length:NREG},()=>({t:0,n:0}));
     for(let i=0;i<N;i++){ if(s.age[i]<18)continue; const r=s.region[i]; cnt[r].t++;
       const pid=s.party[i]; if(pid<0)cnt[r].n++; else cnt[r][pid]=(cnt[r][pid]||0)+1; }
@@ -5001,6 +5670,9 @@ const UI={
         <div style="margin-top:10px"><div style="font-size:10.5px;color:var(--tx3);margin-bottom:6px">공천(후보 선출) 방식</div>
           <div class="cOpts" id="cNom">${[['top','하향식(중앙 지명)'],['member','당원 경선'],['open','개방형 예비선거']].map(([k,l])=>`<button class="cOpt ${(d.nomination||'top')===k?'on':''}" data-nm="${k}">${l}</button>`).join('')}</div>
           <div class="cHint" style="margin-left:0;margin-top:7px">${ {top:'지도부가 후보를 정한다 — 당론 결속은 강하나 낙천한 계파가 반발해 공천 파동·탈당이 잦다',member:'당원이 뽑는다 — 당원은 일반 유권자보다 열성적이라 후보가 선명해지고 계파 갈등은 적다',open:'무당층까지 참여한다 — 중도적 후보가 뽑혀 본선에 강하지만 당 정체성이 흐려지고 당원이 소외된다'}[d.nomination||'top'] }</div></div>
+        <div style="margin-top:10px"><div style="font-size:10.5px;color:var(--tx3);margin-bottom:6px">개헌 절차 (헌법 경직성)</div>
+          <div class="cOpts" id="cRigid">${[['free','즉시 적용'],['flex','의회 과반'],['rigid','가중다수+국민투표']].map(([k,l])=>`<button class="cOpt ${(this.sim.rigidity||'rigid')===k?'on':''}" data-rig="${k}">${l}</button>`).join('')}</div>
+          <div class="cHint" style="margin-left:0;margin-top:7px">${ {free:'설계자 모드 — 누르면 즉시 바뀐다. 실험용.',flex:'연성 헌법(영국형) — 의회 과반만 넘으면 개정된다.',rigid:'경성 헌법(미국·한국형) — 의회 2/3 통과 후 국민투표까지 거쳐야 한다. 대부분 좌초한다.'}[this.sim.rigidity||'rigid'] }</div></div>
         <label class="cChk" style="margin-top:8px"><input type="checkbox" id="cRenew" ${d.renewHalf?'checked':''}>중간선거 — 매 임기 절반만 교체</label>
         ${(d.method==='PR'||d.method==='PARALLEL'||d.method==='MMP')?`<label class="cChk" style="margin-top:6px"><input type="checkbox" id="cAppar" ${d.apparentement!==false?'checked':''}>명부결합(apparentement) — 선거연합이 봉쇄조항을 함께 넘는다</label>`:''}
       </div>
@@ -5033,6 +5705,8 @@ const UI={
     bindSl('cSenPow','senPower',v=>v+'%',100);
     const ck=(id,key)=>{ const el=$('#'+id); if(el)el.onchange=()=>this._draft[key]=el.checked; };
     ck('cRenew','renewHalf'); ck('cSenRenew','senRenew'); ck('cAppar','apparentement');
+    if($('#cRigid')) $('#cRigid').onclick=e=>{ const b=e.target.closest('[data-rig]'); if(!b)return;
+      this.sim.rigidity=b.dataset.rig; this.buildConstUI(); };
     if($('#cNom')) $('#cNom').onclick=e=>{ const b=e.target.closest('[data-nm]'); if(!b)return;
       this._draft.nomination=b.dataset.nm; this.buildConstUI(); };
     $('#cPreset').onclick=e=>{ const b=e.target.closest('[data-preset]'); if(!b)return;
@@ -5061,6 +5735,7 @@ const UI={
     if(v==='events'){ this.renderChronicle(); this.renderRegimeBand(); }
     else if(v==='people'){ this.renderPoliticians(); this.renderContests(); }
     else if(v==='parties'){ this.renderStream(); this.renderPartyLife(); }
+    else if(v==='story'){ this.renderStory(); }
     else if(v==='tools'){ this.renderSnaps(); this.renderHall(); }
   },
   renderSnaps(){
@@ -5112,6 +5787,224 @@ const UI={
     g.fillStyle='rgba(150,170,210,0.6)'; g.font='9px monospace';
     g.fillText(els[0].y+'년', padL, h-5);
     g.fillText(els[n-1].y+'년', w-padR-28, h-5);
+  },
+  showParty(pid){
+    const s=this.sim, p=s.parties.find(q=>q.id===pid); if(!p)return;
+    // 지지층 인구 구성
+    let n=0, age=0, wealth=0, edu=0, jobSec=0; const regCnt=new Array(NREG).fill(0);
+    for(let i=0;i<N;i++){ if(s.party[i]!==pid)continue; n++;
+      age+=s.age[i]; wealth+=s.wealth[i]; edu+=s.education[i]; jobSec+=s.jobSec[i]; regCnt[s.region[i]]++; }
+    const avg=v=>n?(v/n):0;
+    const topReg=regCnt.map((c,r)=>({r,c})).sort((a,b)=>b.c-a.c).slice(0,3).filter(x=>x.c>0);
+    // 이념 궤적 스파크라인
+    let traj='';
+    if(p.lrHist && p.lrHist.length>2){
+      const H=p.lrHist, W=260, HH=46;
+      const lrs=H.map(x=>x.lr), mn=Math.min(...lrs,-0.5), mx=Math.max(...lrs,0.5);
+      const pts=H.map((x,k)=>{ const px=k/(H.length-1)*W; const py=HH-((x.lr-mn)/((mx-mn)||1))*HH; return px.toFixed(1)+','+py.toFixed(1); }).join(' ');
+      const zeroY=HH-((0-mn)/((mx-mn)||1))*HH;
+      traj=`<div style="margin-top:11px"><div style="font-size:9.5px;color:var(--tx3);letter-spacing:1px;margin-bottom:5px">이념 궤적 (${H[0].y}년 → ${H[H.length-1].y}년)</div>
+        <svg viewBox="0 0 ${W} ${HH}" style="width:100%;height:56px;display:block">
+          <line x1="0" y1="${zeroY.toFixed(1)}" x2="${W}" y2="${zeroY.toFixed(1)}" stroke="rgba(180,200,240,0.18)" stroke-dasharray="3 3"/>
+          <polyline points="${pts}" fill="none" stroke="${p.color}" stroke-width="2"/>
+        </svg>
+        <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--tx3)"><span>좌 ${mn.toFixed(1)}</span><span>우 ${mx.toFixed(1)}</span></div></div>`;
+    }
+    // 표결 성향
+    let votes='';
+    const vr=(s.voteRecords||[]).filter(v=>v.rows.some(r=>r.pid===pid)).slice(0,6);
+    if(vr.length){
+      const vlab={yes:'찬성',no:'반대',abst:'기권'}, vcol={yes:'#5ae0b4',no:'#ff6262',abst:'#8fa3c8'};
+      votes=`<div style="margin-top:11px;border-top:1px solid rgba(130,170,255,0.1);padding-top:9px">
+        <div style="font-size:9.5px;color:var(--tx3);letter-spacing:1px;margin-bottom:5px">최근 표결 성향</div>`+
+        vr.map(v=>{ const r=v.rows.find(x=>x.pid===pid);
+          return `<div style="display:flex;gap:8px;font-size:10.5px;padding:2px 0">
+            <span style="font-family:var(--mono);color:var(--cy);min-width:36px">${v.y}년</span>
+            <span style="flex:1;color:var(--tx2)">${v.bill}</span>
+            <span style="color:${vcol[r.vote]}">${vlab[r.vote]}</span></div>`; }).join('')+'</div>';
+    }
+    // 계파
+    let facs='';
+    if(p.factions && p.factions.length){
+      facs=`<div style="margin-top:11px"><div style="font-size:9.5px;color:var(--tx3);letter-spacing:1px;margin-bottom:5px">계파</div>`+
+        p.factions.map(f=>`<div style="display:flex;gap:8px;font-size:10.5px;padding:1px 0">
+          <span style="color:var(--tx2);min-width:70px">${f.dom?'●':'○'} ${f.name}</span>
+          <span style="font-family:var(--mono);color:var(--tx3)">${(f.share*100).toFixed(0)}%</span>
+          ${f.leader?`<span style="color:var(--tx3)">${f.leader.name}</span>`:''}</div>`).join('')+'</div>';
+    }
+    const html=`<div style="font-size:12px;color:var(--tx2);line-height:1.8">
+      <div style="display:flex;align-items:center;gap:9px">
+        <div class="pdot" style="background:${p.color};width:12px;height:12px"></div>
+        <b style="font-size:15px;color:var(--tx)">${p.name}</b>
+        <span style="font-family:var(--mono);font-size:11px;color:var(--tx3)">${p.seats}석 · ${(p.support*100).toFixed(1)}%</span></div>
+      <div style="font-size:11px;color:var(--tx3);margin-top:3px">"${p.slogan}" · ${p.founded}년 창당${p.leader?` · ▸${p.leader.name} 대표`:''}</div>
+      <div style="margin-top:10px;font-size:11px">
+        지지층 평균: ${avg(age).toFixed(0)}세 · 자산 ${avg(wealth).toFixed(2)} · 교육 ${avg(edu).toFixed(2)} · 고용안정 ${avg(jobSec).toFixed(2)}<br>
+        강세 지역: ${topReg.map(x=>`${REGION_NAMES[x.r]} <span style="color:var(--tx3)">${(x.c/Math.max(n,1)*100).toFixed(0)}%</span>`).join(' · ')||'—'}
+      </div>
+      ${traj}${facs}${votes}
+    </div>`;
+    this._modal('정당 상세', html);
+  },
+  renderReferendum(){
+    const s=this.sim, panel=$('#refPanel'), host=$('#refBody'); if(!panel||!host)return;
+    const R=s.referendum, last=(s.refRecords||[])[0];
+    if(!R && !last){ panel.style.display='none'; return; }
+    panel.style.display='block';
+    if(R){
+      const d=Math.max(0,R.at-s.tick);
+      const poll=R.poll||[];
+      const cur=poll.length?poll[poll.length-1]:50;
+      let spark='';
+      if(poll.length>2){ const W=240,H=34, mn=Math.min(...poll,40), mx=Math.max(...poll,60);
+        const pts=poll.map((v,k)=>`${(k/(poll.length-1)*W).toFixed(1)},${(H-((v-mn)/((mx-mn)||1))*H).toFixed(1)}`).join(' ');
+        const y50=H-((50-mn)/((mx-mn)||1))*H;
+        spark=`<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:42px;display:block;margin-top:6px">
+          <line x1="0" y1="${y50.toFixed(1)}" x2="${W}" y2="${y50.toFixed(1)}" stroke="rgba(255,180,77,0.4)" stroke-dasharray="3 3"/>
+          <polyline points="${pts}" fill="none" stroke="${cur>50?'#5ae0b4':'#ff6262'}" stroke-width="2"/></svg>`;
+      }
+      host.innerHTML=`<div style="font-size:12.5px;color:var(--tx)"><b>${R.label}</b>
+        <span style="font-size:11px;color:var(--am);margin-left:8px">투표일까지 D-${d}개월</span></div>
+        <div style="font-size:11px;color:var(--tx3);margin-top:3px">의회 통과 ${((R.parlRate||0)*100).toFixed(0)}% · 캠페인 진행 중</div>
+        <div style="display:flex;align-items:center;gap:9px;margin-top:8px">
+          <span style="font-size:11px;color:var(--tx3);min-width:52px">현재 여론</span>
+          <div style="flex:1;height:14px;border-radius:7px;background:rgba(255,98,98,0.18);overflow:hidden">
+            <div style="width:${cur}%;height:100%;background:rgba(90,224,180,0.55)"></div></div>
+          <span style="font-family:var(--mono);font-size:11px;color:${cur>50?'#5ae0b4':'#ff6262'}">찬성 ${cur.toFixed(1)}%</span></div>
+        ${spark}`;
+      return;
+    }
+    // 최근 결과
+    const g=last.groups;
+    const regHi=[...last.regions].sort((a,b)=>b.pct-a.pct).slice(0,2);
+    const regLo=[...last.regions].sort((a,b)=>a.pct-b.pct).slice(0,2);
+    host.innerHTML=`<div style="font-size:12.5px;color:var(--tx)"><b>${last.label}</b>
+      <span style="font-size:11px;color:${last.passed?'#5ae0b4':'var(--rd)'};margin-left:8px">${last.passed?'가결':'부결'}</span>
+      <span style="font-size:11px;color:var(--tx3);margin-left:6px">${last.y}년</span></div>
+      <div style="display:flex;align-items:center;gap:9px;margin-top:8px">
+        <div style="flex:1;height:16px;border-radius:8px;background:rgba(255,98,98,0.2);overflow:hidden">
+          <div style="width:${last.pct}%;height:100%;background:rgba(90,224,180,0.6)"></div></div>
+        <span style="font-family:var(--mono);font-size:11.5px">찬성 ${last.pct.toFixed(1)}%</span></div>
+      <div style="font-size:10.5px;color:var(--tx3);margin-top:4px">투표율 ${last.turnout.toFixed(0)}%${last.pct<55&&last.passed?' · <span style="color:var(--am)">근소한 차이로 정당성 논란</span>':''}</div>
+      <div style="margin-top:9px;font-size:10.5px;color:var(--tx2);line-height:1.7">
+        연령: 40세 미만 <b>${g.young.toFixed(0)}%</b> · 40세 이상 <b>${g.old.toFixed(0)}%</b><br>
+        학력: 고학력 <b>${g.hiEdu.toFixed(0)}%</b> · 저학력 <b>${g.loEdu.toFixed(0)}%</b><br>
+        찬성 강세: ${regHi.map(x=>REGION_NAMES[x.r]+' '+x.pct.toFixed(0)+'%').join(' · ')}<br>
+        반대 강세: ${regLo.map(x=>REGION_NAMES[x.r]+' '+x.pct.toFixed(0)+'%').join(' · ')}</div>`;
+  },
+  renderDemoHealth(){
+    const s=this.sim, host=$('#demoHealth'); if(!host)return;
+    const S=s.S;
+    const items=[
+      {label:'민주주의 지수', v:(s.demIndex??70)/100, good:'high', txt:Math.round(s.demIndex??70)},
+      {label:'선거 공정성', v:(s.electionFair??1), good:'high', txt:((s.electionFair??1)*100|0)+'%'},
+      {label:'언론 자유', v:S.mediaFreedom/100, good:'high', txt:Math.round(S.mediaFreedom)},
+      {label:'정치 안정도', v:S.stability/100, good:'high', txt:Math.round(S.stability)},
+      {label:'사회 불안', v:clamp(s.unrest??0), good:'low', txt:((s.unrest??0)*100|0)},
+      {label:'군부 영향력', v:clamp(s.milInfluence??0), good:'low', txt:((s.milInfluence??0)*100|0)},
+      {label:'양극화', v:S.polarization/100, good:'low', txt:Math.round(S.polarization)},
+    ];
+    // 위험 판정
+    const risks=[];
+    if((s.electionFair??1)<0.8) risks.push('선거 공정성 훼손');
+    if((s.milInfluence??0)>0.4) risks.push('군부 개입 위험');
+    if((s.unrest??0)>0.5) risks.push('사회 불안 고조');
+    if(S.mediaFreedom<45) risks.push('언론 통제');
+    if(S.stability<40) risks.push('정권 붕괴 위험');
+    const col=(it)=>{ const g=it.good==='high'? it.v : 1-it.v;
+      return g>0.65?'#5ae0b4':g>0.4?'#ffb24d':'#ff6262'; };
+    let html='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:7px 14px">';
+    html+=items.map(it=>`<div style="display:flex;align-items:center;gap:8px;font-size:11px">
+      <span style="min-width:74px;color:var(--tx3)">${it.label}</span>
+      <div style="flex:1;height:7px;border-radius:4px;background:rgba(120,140,180,0.12);overflow:hidden">
+        <div style="width:${clamp(it.v)*100}%;height:100%;background:${col(it)}"></div></div>
+      <span style="font-family:var(--mono);font-size:10px;color:var(--tx2);min-width:30px;text-align:right">${it.txt}</span>
+    </div>`).join('')+'</div>';
+    if(risks.length) html+=`<div style="margin-top:10px;padding:7px 10px;border-radius:8px;background:rgba(255,98,98,0.1);border:1px solid rgba(255,98,98,0.3);font-size:11px;color:#ff8c8c">⚠ ${risks.join(' · ')}</div>`;
+    else html+='<div style="margin-top:9px;font-size:10.5px;color:var(--tx3)">체제 위기 신호 없음</div>';
+    host.innerHTML=html;
+  },
+  renderCitizen(){
+    const s=this.sim, host=$('#citBody'); if(!host)return;
+    if(this._citIdx===undefined || this._citIdx<0) this._citIdx = s.pinnedCitizen>=0? s.pinnedCitizen : s.randomCitizen();
+    const i=this._citIdx;
+    const p = s.party[i]>=0? s.parties.find(q=>q.id===s.party[i]) : null;
+    const bar=(v,c)=>`<div style="flex:1;height:6px;border-radius:3px;background:rgba(120,140,180,0.12);overflow:hidden"><div style="width:${clamp(v)*100}%;height:100%;background:${c}"></div></div>`;
+    const row=(label,v,c,txt)=>`<div style="display:flex;align-items:center;gap:8px;font-size:10.5px;margin-bottom:3px">
+      <span style="min-width:74px;color:var(--tx3)">${label}</span>${bar(v,c)}
+      <span style="font-family:var(--mono);font-size:9.5px;color:var(--tx2);min-width:34px;text-align:right">${txt??(clamp(v)*100|0)}</span></div>`;
+    const pinned = s.pinnedCitizen===i;
+    let html=`<div style="display:flex;align-items:baseline;gap:9px;margin-bottom:9px;flex-wrap:wrap">
+      <b style="font-size:14px;color:var(--tx)">${Math.round(s.age[i])}세</b>
+      <span style="font-size:11.5px;color:var(--tx2)">${REGION_NAMES[s.region[i]]||''}</span>
+      <span style="font-size:11px;color:var(--tx3)">${INDUSTRY_LABEL[REGION_TRAITS[s.region[i]].ind]||''} 지역</span>
+      ${p?`<span style="font-size:11.5px;color:${p.color}">▸ ${p.name} 지지</span>`:'<span style="font-size:11.5px;color:var(--tx3)">▸ 무당층</span>'}
+      ${pinned?'<span style="font-size:9.5px;padding:1px 7px;border-radius:5px;background:rgba(255,180,77,0.15);color:var(--am)">추적 중</span>':''}
+    </div>`;
+    html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">';
+    html+='<div>';
+    html+='<div style="font-size:9.5px;color:var(--tx3);letter-spacing:1px;margin-bottom:5px">삶의 조건</div>';
+    html+=row('자산', s.wealth[i], '#ffc14d');
+    html+=row('소득', s.income[i], '#ffc14d');
+    html+=row('교육', s.education[i], '#54e0ff');
+    html+=row('고용 안정', s.jobSec[i], s.jobSec[i]<0.4?'#ff6262':'#5ae0b4');
+    html+=row('계층 이동성', s.mobility[i], '#9dff5a');
+    html+=row('기술 적응난', s.adaptCost[i], '#ff8c5a');
+    html+='</div><div>';
+    html+='<div style="font-size:9.5px;color:var(--tx3);letter-spacing:1px;margin-bottom:5px">마음</div>';
+    html+=row('개방성', s.openness[i], '#54e0ff');
+    html+=row('공포', s.fear[i], '#ff6262');
+    html+=row('박탈감', s.resentment[i], '#ff5a7a');
+    html+=row('집단정체성', s.tribalism[i], '#b08cff');
+    html+=row('체제신뢰', s.trust[i], '#5ae0b4');
+    html+=row('급진성', s.radical[i], s.radical[i]>0.5?'#ff6262':'#8fa3c8');
+    html+='</div></div>';
+    html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px;margin-top:8px"><div>';
+    html+=row('정치 관심', s.polInterest[i], '#54e0ff');
+    html+=row('정당 충성', s.loyalty[i], '#9dff5a');
+    html+='</div><div>';
+    html+=row('정당일체감', s.partyID?s.partyID[i]:0, '#b08cff');
+    const re0=s.retroEval?s.retroEval[i]:0;
+    html+=row('정권 평가', (re0+1)/2, re0<0?'#ff6262':'#5ae0b4', re0.toFixed(2));
+    html+='</div></div>';
+    // 추적 이력
+    if(pinned && s.pinLog && s.pinLog.length){
+      html+='<div style="margin-top:11px;border-top:1px solid rgba(130,170,255,0.1);padding-top:9px">';
+      html+='<div style="font-size:9.5px;color:var(--tx3);letter-spacing:1px;margin-bottom:6px">생애 기록</div>';
+      html+=s.pinLog.slice(-10).reverse().map(e=>`<div style="display:flex;gap:8px;font-size:10.5px;padding:2px 0">
+        <span style="font-family:var(--mono);color:var(--cy);min-width:38px">${e.y}년</span>
+        <span style="color:var(--tx3);min-width:30px">${e.age}세</span>
+        <span style="color:var(--tx2)">${e.ev||'—'}</span></div>`).join('');
+      html+='</div>';
+    }
+    host.innerHTML=html;
+  },
+  renderStory(){
+    const s=this.sim;
+    // 시대
+    const eh=$('#eraList');
+    if(eh){
+      const eras=s.detectEras();
+      eh.innerHTML = eras.length? eras.map(e=>`
+        <div style="padding:9px 0;border-bottom:1px solid rgba(130,170,255,0.07)">
+          <div style="display:flex;align-items:baseline;gap:9px;margin-bottom:3px">
+            <span style="font-family:var(--mono);font-size:10.5px;color:var(--cy)">${e.from}~${e.to}년</span>
+            <b style="font-size:13px;color:var(--tx)">${e.name}</b>
+          </div>
+          <div style="font-size:11px;color:var(--tx3)">총선 ${e.elections}회 · 평균 유효정당수 ${e.enp.toFixed(1)} · 구분 사유: ${e.reason}</div>
+        </div>`).join('')
+        : '<div class="muted" style="font-size:11px">아직 시대를 나눌 만큼 역사가 쌓이지 않았다.</div>';
+    }
+    // 정권 교체 서사
+    const th=$('#turnList');
+    if(th){
+      const ts=(s.turnovers||[]).slice(0,12);
+      th.innerHTML = ts.length? ts.map(t=>`
+        <div style="font-size:12px;color:var(--tx2);line-height:1.7;padding:7px 0;border-bottom:1px solid rgba(130,170,255,0.06)">
+          ${s.narrateTurnover(t)}
+        </div>`).join('')
+        : '<div class="muted" style="font-size:11px">아직 정권 교체가 없었다.</div>';
+    }
   },
   renderContests(){
     const s=this.sim, host=$('#contestList'); if(!host)return;
@@ -5170,7 +6063,9 @@ const UI={
     lines.push(`출신: ${REGION_NAMES[L.homeReg]||'미상'} · 현재 ${L.dead?'고인('+age+'세 별세 추정)':age+'세'}`);
     lines.push(`카리스마 ${(L.charisma*100|0)} · 야망 ${(L.ambition*100|0)} · 청렴 ${(L.integrity*100|0)}${L.scandal?' · 의혹 '+L.scandal+'건':''}`);
     if(L.peakOffice) lines.push(`최고직: <b style="color:var(--am)">${officeLbl[L.peakOffice]}</b>`);
+    const memoir = s.narrateLife(L);
     const body = `<div style="font-size:12px;line-height:1.8;color:var(--tx2)">${lines.join('<br>')}</div>`
+      + (memoir? `<div style="margin-top:12px;padding:10px 12px;border-radius:9px;background:rgba(120,160,255,0.06);border-left:2px solid var(--cy);font-size:12px;line-height:1.8;color:var(--tx2)">${memoir}</div>`:'')
       + (story.length? `<div style="margin-top:12px;border-top:1px solid rgba(130,170,255,0.12);padding-top:10px">
           <div style="font-size:10.5px;color:var(--tx3);letter-spacing:1px;margin-bottom:6px">일대기</div>`
           + story.map(c=>`<div style="font-size:11.5px;color:var(--tx2);margin-bottom:4px"><span style="font-family:var(--mono);color:var(--cy)">${c.y}년</span> ${c.t}</div>`).join('')
@@ -5432,7 +6327,12 @@ const UI={
 
   renderParties(){
     const s=this.sim;
-    const ps=[...s.parties].sort((a,b)=>b.support-a.support);
+    const psAll=[...s.parties].sort((a,b)=>b.support-a.support);
+    // 정당이 많으면 상위만 표시하고 나머지는 요약 (30개 모드 대응)
+    const LIMIT=12;
+    const overflow = (!this._psExpand && psAll.length>LIMIT);
+    const ps = overflow? psAll.slice(0,LIMIT) : psAll;
+    this._psHidden = overflow? psAll.slice(LIMIT) : [];
     $('#partyList').innerHTML= ps.length? ps.map(p=>{
       const tags=[];
       if(s.govCoalition.includes(p.id))tags.push('집권');
@@ -5466,7 +6366,7 @@ const UI={
       }
       return `<div class="party" data-pid="${p.id}" style="cursor:pointer;${ally?`border-left:3px solid ${ally.color}`:''}">
         <div class="pdot" style="background:${p.color};box-shadow:0 0 9px ${p.color}"></div>
-        <div class="pinfo"><div class="pname">${p.name} ${tags.map(t=>`<span class="tagm">${t}</span>`).join('')}${allyBadge}${facHint}</div>
+        <div class="pinfo"><div class="pname"><span data-pdet="${p.id}" style="cursor:pointer;text-decoration:underline;text-decoration-color:rgba(130,170,255,0.3);text-underline-offset:3px">${p.name}</span> ${tags.map(t=>`<span class="tagm">${t}</span>`).join('')}${allyBadge}${facHint}</div>
         <div class="pslogan">${p.leader?`<span style="color:${p.color}">▸ ${p.leader.name}</span> 대표${p.leader.office==='pres'?' · <b style="color:var(--am)">대통령</b>':''} · `:''}"${p.slogan}"</div>${facHtml}</div>
         <button class="banBtn edit" data-edit="${p.id}" title="편집">✎</button>
         <button class="banBtn split" data-split="${p.id}" title="분당">⑂</button>
@@ -5474,6 +6374,16 @@ const UI={
         <div class="pstat"><div class="seats">${p.seats}석${(p.dSeats||p.pSeats)?`<span style="font-size:9.5px;color:var(--tx3)"> 지${p.dSeats||0}·비${p.pSeats||0}</span>`:''}</div><div class="sup">${(p.support*100).toFixed(1)}%</div></div>
       </div>`;}).join('')
       : '<div class="muted">아직 정당이 없다. 시민 심리가 군집을 이루면 정치 세력이 스스로 태어난다.</div>';
+    // 정당 과다 시 접힘 요약 행
+    if(this._psHidden && this._psHidden.length){
+      const hid=this._psHidden, sup=hid.reduce((a,p)=>a+p.support,0)*100, st=hid.reduce((a,p)=>a+(p.seats||0),0);
+      $('#partyList').insertAdjacentHTML('beforeend',
+        `<div id="psMore" style="padding:8px 10px;text-align:center;cursor:pointer;font-size:11px;color:var(--cy);border-top:1px dashed rgba(130,170,255,0.18)">
+          ▾ 그 외 ${hid.length}개 정당 더 보기 <span style="color:var(--tx3)">(합계 ${st}석 · 지지 ${sup.toFixed(1)}%)</span></div>`);
+    } else if(this._psExpand && this.sim.parties.filter(p=>p.id>=0).length>12){
+      $('#partyList').insertAdjacentHTML('beforeend',
+        `<div id="psLess" style="padding:8px 10px;text-align:center;cursor:pointer;font-size:11px;color:var(--tx3);border-top:1px dashed rgba(130,170,255,0.18)">▴ 접기</div>`);
+    }
     this._syncChips();
     if($('#chipIdeoColor')){ const on=s.colorMode==='ideology';
       $('#chipIdeoColor').textContent = on?'이념색':'고정색';
