@@ -2779,11 +2779,16 @@ class Sim {
     // ② 입헌화 압력: 교육·도시화·개방성이 오르면 커진다
     if(!this.constPressure) this.constPressure=0;
     const drive = this.mean('education')*0.4 + S.urbanization/100*0.3 + this.mean('openness')*0.3;
-    this.constPressure = clamp(this.constPressure + (drive-0.46)*0.055 + (K.cruel-0.5)*0.012, 0, 1);
+    // 근대화 압력(항상 양수 방향) + 폭정 가산(관대한 왕도 근대화 압력은 받는다)
+    let dP = Math.max(0,(drive-0.48))*0.030 + Math.max(0,K.cruel-0.5)*0.010;
+    // 무능한 왕은 불만을 키우고, 유능한 왕은 늦춘다
+    dP += Math.max(0,(0.45-K.compet))*0.012;
+    dP -= Math.max(0,(K.compet-0.55))*0.010;
+    this.constPressure = clamp(this.constPressure + dP, 0, 1);
     // ③ 임계 도달 시 세 갈래
     if(this.dynastyLock){ this.constPressure=clamp(this.constPressure*0.985,0,1); }
     if(!this.dynastyLock && this.constPressure>0.55 && this.tick%12===0 && rnd()<0.15){
-      if(K.reform>0.6){
+      if(K.reform>=0.45){
         this.pushNews(4,'pos',`<b>${K.name}</b>, 헌법을 하사 — 위로부터의 입헌 개혁`);
         this.chron(`${K.name} 흠정헌법 반포 — 입헌군주제로`);
         this.govForm='CONSTMON'; this.constPressure=0.2;
@@ -3740,7 +3745,19 @@ class Sim {
         if(seats<=maj) seats = this._seekConfidenceSupply(lead, ranked, seats, maj);
         this.gridlock=false;
       }
-      if(this.govForm==='ABSMON'){ /* 왕이 행정수반 — 의회는 자문 */ }
+      if(this.govForm==='ABSMON'){
+        // 전제군주정: 왕이 총리를 임명한다. 의회 다수가 아니라 왕의 성향에 가까운 정당.
+        const K=this.king;
+        if(K && ranked.length){
+          // 왕의 성향: 개혁적이면 개방·진보 성향 정당, 보수적이면 권위·전통 정당을 총애
+          const pick=ranked.slice().sort((a,b)=>{
+            const sc=p=>{ const openish=(p.cent[0]||0), authish=(p.cent[2]||0);
+              return K.reform>0.5? (openish*1.2 - authish*0.6) : (authish*1.2 - openish*0.6); };
+            return sc(b)-sc(a); })[0];
+          if(pick){ lead=pick; this.govCoalition=[pick.id]; seats=pick.seats; }
+        }
+        this.gridlock=false;   // 왕정에서는 의회 교착이 국정을 막지 못한다
+      }
       if(this.govForm==='MONARCH' && !this.monarch){
         const mp=ranked[0]; this.monarch={pid:mp.id, since:this.year(), reignLeft:Math.round(14+rnd()*22)};
         this.pushNews(3,'norm',`의회, <b>${mp.name}</b> 추대 후보를 국왕으로 선출 — 대관식 거행`); this.chron(`국왕 선출 (${mp.name} 추대)`);
