@@ -665,6 +665,7 @@ canvas.chart.tall{height:210px}
               <span class="chipBar" style="margin-left:auto;margin-bottom:0">
                 <button class="viewChip sel" data-axis="pca">갈등축 (자동)</button>
                 <button class="viewChip" data-axis="nolan">경제·사회 (Nolan)</button>
+                <button class="viewChip" data-axis="estate">신분별</button>
               </span></h3>
             <div id="scatterWrap">
               <canvas id="scatterCv"></canvas>
@@ -687,6 +688,7 @@ canvas.chart.tall{height:210px}
                 <button class="viewChip" data-map="gov">주지사</button>
                 <button class="viewChip" data-map="assem">지방의회</button>
                 <button class="viewChip" data-map="grievance">분리 압력</button>
+                <button class="viewChip" data-map="estate">신분 분포</button>
               </span></h3>
             <div id="mapWrap">
               <svg id="mapSvg" viewBox="0 0 460 330"></svg>
@@ -766,8 +768,10 @@ canvas.chart.tall{height:210px}
           <div data-hv="story" style="display:none">
             <div class="panel" style="margin-bottom:14px"><h3>시대 — 이 나라가 지나온 국면</h3>
               <div id="eraList"></div></div>
-            <div class="panel mg"><h3>정권 교체의 순간들</h3>
+            <div class="panel mg" style="margin-bottom:14px"><h3>정권 교체의 순간들</h3>
               <div id="turnList"></div></div>
+            <div class="panel" id="estateStoryPanel" style="display:none"><h3>신분제 연대기</h3>
+              <div id="estateStory"></div></div>
           </div>
           <div data-hv="tools" style="display:none">
             <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px">
@@ -1260,6 +1264,8 @@ class Sim {
       const base = parent>=0 ? this[f][parent]*0.5 + gauss(0.5,0.16)*0.5 : gauss(0.5,0.16);
       this[f][i] = clamp(base + gauss(0,0.05));
     }
+    // ── 신분이 자산·심리를 규정한다 (신분제 활성 여부와 무관하게 구조는 유지) ──
+    this._applyEstateProfile(i);
     // 지역 산업·도시화에서 오는 약한 사회화 편향 (성향 하드코딩 아님 — 환경 → 심리)
     if(parent<0 || rnd()<0.5){
       this.openness[i]=clamp(this.openness[i]+(RT.urban-0.5)*0.10);
@@ -2196,6 +2202,7 @@ class Sim {
     if(!this.partyLock && this.autoAlliance && this.tick%12===0) this._stepAlliances();
     if(this.factionsOn && this.tick%12===0){ this.stepFactions(); this.stepPoliticians(); }
     if(this.tick%12===0) this.updatePartyColors();
+    if(this.estateOn && this.tick%12===0) this.updatePartyEstates();
     if(this.tick%12===0){ for(const p of this.parties){ if(p.id<0)continue;
       if(!p.lrHist) p.lrHist=[];
       p.lrHist.push({y:this.year(), lr:+this.lr(p.cent).toFixed(3), sup:+(p.support||0).toFixed(3)});
@@ -2707,6 +2714,9 @@ class Sim {
     const counts=new Map(this.parties.map(p=>[p.id,0]));
     const ruling=new Set(this.govCoalition);
     const rw=(this.retroWeight??1)*1.35;   // 회고적 투표 강도
+    const estOn=this.estateOn;
+    let estBase=[0,0,0,0,0];
+    if(estOn){ const c=this.estateCounts(), t=c.reduce((a,b)=>a+b,0)||1; estBase=c.map(v=>v/t); }
     const acts=(this.issuesOn&&this.issues.length)?this.issues:null;   // 활성 쟁점
     // 공동명부: 정당별 (통합 프리미엄, 이념 격차) 사전 계산
     const jl=new Map();
@@ -2728,6 +2738,12 @@ class Sim {
         u += Math.sqrt(p.support)*0.45*(0.5+this.conformity[i]);   // 밴드왜건(당선 가능성·동조)
         // 회고적 투표: 집권 세력은 성과로 심판받는다
         if(rw && ruling.has(p.id)) u += this.retroEval[i]*rw*(0.55+this.polInterest[i]*0.7);
+        // 신분 대표성: 내 신분을 많이 품은 정당에 끌린다 (신분이 곧 균열축)
+        if(estOn && p.estMix){
+          const myE=this.estate[i];
+          const rep0=p.estMix[myE]||0;
+          u += (rep0 - estBase[myE]) * 3.2 * (0.5+this.tribalism[i]*0.8);
+        }
         // 쟁점 투표: 내가 중시하는 쟁점에서 입장이 가까운 정당을 지지
         if(acts){ for(const it of acts){
           const mine=clamp(tmp[it.axis]*1.6,-1,1);           // 시민 입장
@@ -2807,6 +2823,43 @@ class Sim {
     return true;
   }
   // ════════ 신분제 ════════
+  // 신분에 따른 자산·심리 기본형 (배정 직후 1회)
+  _applyEstateProfile(i){
+    const e=this.estate[i];
+    if(e===0){        // 성직자: 교회 재산, 높은 교육, 강한 체제 옹호
+      this.wealth[i]=clamp(this.wealth[i]*0.5 + 0.9 + gauss(0,0.25), 0.05, 5);
+      this.education[i]=clamp(this.education[i]*0.5 + 0.38 + gauss(0,0.08));
+      this.trust[i]=clamp(0.74 + gauss(0,0.10));
+      this.conformity[i]=clamp(0.72 + gauss(0,0.10));
+      this.openness[i]=clamp(this.openness[i]*0.5 + 0.16);
+      this.resentment[i]=clamp(this.resentment[i]*0.4 + 0.10);
+    } else if(e===1){ // 귀족: 토지·지대, 체제 수호, 폐쇄적
+      this.wealth[i]=clamp(this.wealth[i]*0.4 + 2.1 + gauss(0,0.5), 0.3, 6);
+      this.education[i]=clamp(this.education[i]*0.5 + 0.34 + gauss(0,0.08));
+      this.trust[i]=clamp(0.78 + gauss(0,0.09));
+      this.conformity[i]=clamp(0.66 + gauss(0,0.11));
+      this.openness[i]=clamp(this.openness[i]*0.5 + 0.14);
+      this.resentment[i]=clamp(this.resentment[i]*0.3 + 0.06);
+      this.tribalism[i]=clamp(this.tribalism[i]*0.6 + 0.28);
+    } else if(e===2){ // 부르주아: 축적한 부, 개방적, 권리 요구
+      this.wealth[i]=clamp(this.wealth[i]*0.7 + 1.0 + gauss(0,0.3), 0.4, 5);
+      this.education[i]=clamp(this.education[i]*0.6 + 0.28 + gauss(0,0.08));
+      this.trust[i]=clamp(0.50 + gauss(0,0.12));
+      this.openness[i]=clamp(this.openness[i]*0.5 + 0.34);
+      this.polInterest[i]=clamp(this.polInterest[i]*0.6 + 0.28);
+      this.resentment[i]=clamp(this.resentment[i]*0.6 + 0.18);
+    } else if(e===3){ // 평민: 세금 부담, 낮은 신뢰
+      this.wealth[i]=clamp(this.wealth[i]*0.9, 0.02, 2.2);
+      this.trust[i]=clamp(0.40 + gauss(0,0.12));
+      this.resentment[i]=clamp(this.resentment[i]*0.6 + 0.30);
+    } else {          // 농노: 예속, 축적 불가, 극단적 박탈
+      this.wealth[i]=clamp(this.wealth[i]*0.3, 0.01, 0.35);
+      this.education[i]=clamp(this.education[i]*0.6);
+      this.trust[i]=clamp(0.24 + gauss(0,0.10));
+      this.resentment[i]=clamp(this.resentment[i]*0.5 + 0.44);
+      this.mobility[i]=clamp(this.mobility[i]*0.3);
+    }
+  }
   // 투표 자격: 모드에 따라 신분·재산 조건이 붙는다
   canVote(i){
     if(this.age[i]<this.con.voteAge) return false;
@@ -2843,6 +2896,19 @@ class Sim {
     this._sufElig=set;
   }
   // 전체 시민 지지율 vs 실제 유권자 지지율의 괴리
+  // 정당별 신분 구성: 어느 신분을 대변하는 정당인가
+  updatePartyEstates(){
+    if(!this.estateOn){ for(const p of this.parties) p.estMix=null; return; }
+    const acc=new Map();
+    for(const p of this.parties){ if(p.id>=0) acc.set(p.id,[0,0,0,0,0]); }
+    for(let i=0;i<N;i++){ if(this.age[i]<18||this.party[i]<0)continue;
+      const a=acc.get(this.party[i]); if(a) a[this.estate[i]]++; }
+    for(const p of this.parties){ if(p.id<0)continue;
+      const a=acc.get(p.id); if(!a) continue;
+      const t=a.reduce((x,y)=>x+y,0);
+      p.estMix = t? a.map(v=>v/t) : null;
+    }
+  }
   suffrageBias(){
     if(!this.estateOn) return null;
     const all=new Map(), vot=new Map();
@@ -2874,6 +2940,25 @@ class Sim {
     if(!this.estateOn) return;
     this._updateSuffrageThreshold();
     const S=this.S, m=this.estateMode;
+    // ── 지대·십일조: 특권 신분이 하층에게서 부를 이전받는다 (제로섬) ──
+    if(this.tick%6===0){
+      const priv=[], lower=[];
+      for(let i=0;i<N;i++){ if(this.age[i]<18)continue;
+        const e=this.estate[i];
+        if(e===0||e===1) priv.push(i); else if(e>=3) lower.push(i); }
+      if(priv.length && lower.length){
+        const rate = (m==='estates'||m==='caste'||m==='serf'||m==='theo')? 0.004 : 0.0015;
+        let pool=0;
+        for(const i of lower){ const take=this.wealth[i]*rate; this.wealth[i]=clamp(this.wealth[i]-take,0.01,6); pool+=take; }
+        const share=pool/priv.length;
+        for(const i of priv) this.wealth[i]=clamp(this.wealth[i]+share,0.01,8);
+      }
+      // 농노: 축적 자체가 막힌다
+      if(m==='serf'||m==='caste') for(let i=0;i<N;i+=2){ if(this.estate[i]===4) this.wealth[i]=clamp(this.wealth[i]*0.985,0.01,0.4); }
+      // 부르주아: 경제 성장의 과실을 가져간다
+      if(S.gdpGrowth>0) for(let i=0;i<N;i+=2){ if(this.estate[i]===2)
+        this.wealth[i]=clamp(this.wealth[i]*(1+S.gdpGrowth*0.006),0.02,8); }
+    }
     // ── 특권 신분의 조세 면제 → 평민 박탈감 ──
     const privileged = (m==='estates'||m==='caste'||m==='serf'||m==='theo');
     if(privileged && this.tick%6===0){
@@ -2882,6 +2967,17 @@ class Sim {
         if(e>=2) this.resentment[i]=clamp(this.resentment[i]+0.0035);   // 세금 전담
         else this.trust[i]=clamp(this.trust[i]+0.002);                   // 특권층은 체제 만족
       }
+    }
+    // ── 신분별 심리 지속 편향 ──
+    for(let i=0;i<N;i++){
+      const e=this.estate[i];
+      // 목표값으로 끌어당김(일반 심리 갱신에 밀리지 않도록 강한 앵커)
+      if(e<=1){ this.trust[i]=lerp(this.trust[i],0.85,0.10); this.openness[i]=lerp(this.openness[i],0.30,0.03);
+                this.resentment[i]=lerp(this.resentment[i],0.15,0.04); }
+      else if(e===2){ this.openness[i]=lerp(this.openness[i],0.72,0.04); this.polInterest[i]=lerp(this.polInterest[i],0.70,0.03);
+                this.trust[i]=lerp(this.trust[i],0.48,0.03); }
+      else if(e===3){ this.trust[i]=lerp(this.trust[i],0.35,0.06); this.resentment[i]=lerp(this.resentment[i],0.62,0.035); }
+      else if(e===4){ this.trust[i]=lerp(this.trust[i],0.15,0.10); this.resentment[i]=lerp(this.resentment[i],0.78,0.05); }
     }
     // ── 참정권 배제에 따른 불만 ──
     if(m==='census'||m==='weighted'||m==='estates'||m==='serf'||m==='caste'){
@@ -2901,6 +2997,47 @@ class Sim {
       let dP = Math.max(0,(drive-0.44))*PACE.rate;
       if(m==='none') dP=0;
       this.estatePressure = clamp((this.estatePressure||0) + dP - PACE.decay, 0, 1);
+      // 압력 구성 요소 기록(UI 표시용)
+      this._estFactors = {
+        bourg: +(bourg*1.2).toFixed(3),
+        edu: +(this.mean('education')*0.35).toFixed(3),
+        urban: +(S.urbanization/100*0.25).toFixed(3),
+        resent: +(this.mean('resentment')*0.3).toFixed(3),
+        decay: -PACE.decay,
+      };
+      // ── 신분 갈등 사건: 압력이 쌓이는 과정 자체를 사건으로 ──
+      if(rnd() < 0.22 + this.estatePressure*0.35){
+        const P=this.estatePressure, priv=(m==='estates'||m==='caste'||m==='serf'||m==='theo');
+        const pool=[];
+        const R=()=>REGION_NAMES[(rnd()*NREG)|0];
+        if(priv){
+          pool.push(['평민','귀족 면세 특권에 평민 반발 — 전국 청원 운동',2]);
+          pool.push(['평민',`<b>${R()}</b>에서 조세 거부 운동 — 징세관 축출`,2]);
+          pool.push(['성직','성직자 십일조 인상에 신도들 반발',2]);
+        }
+        pool.push(['부르주아','상공인 단체, <b>참정권 확대</b> 요구 집회',2]);
+        pool.push(['부르주아','신흥 상인 계층, 관직 개방을 요구하는 진정서 제출',2]);
+        if(m==='serf'||m==='caste'){
+          pool.push(['농노',`<b>${R()} 농노 봉기</b> — 영주 저택 습격`,3]);
+          pool.push(['농노',`${R()}에서 농노 집단 도주 — 영주들 추적대 조직`,2]);
+        }
+        pool.push(['특권층','성직자·귀족 회의, 개혁안에 집단 반대 성명',2]);
+        pool.push(['특권층','귀족 자제들의 관직 독점에 비판 여론',2]);
+        if(P>0.35) pool.push(['평민','조세 부담에 항의하는 대규모 시위 — 수만 명 운집',3]);
+        if(P>0.5) pool.push(['평민',`<b>${R()}</b> 곡물 폭동 — 빵값 폭등에 군중 봉기`,3]);
+        if(m==='census'||m==='weighted') pool.push(['배제층','투표권 없는 시민들의 참정권 청원 확산',2]);
+        if(m==='theo') pool.push(['세속','세속 지식인들, 성직 특권 비판 서적 유포',2]);
+        if(pool.length){
+          // 최근에 쓴 문구는 제외하고 고른다
+          if(!this._estNewsLog) this._estNewsLog=[];
+          const fresh=pool.filter(x=>!this._estNewsLog.includes(x[1]));
+          const pick=(fresh.length?fresh:pool)[(rnd()*(fresh.length||pool.length))|0];
+          this._estNewsLog.push(pick[1]); if(this._estNewsLog.length>3) this._estNewsLog.shift();
+          const [who,msg,sev]=pick;
+          this.pushNews(sev, sev>=3?'sev2':'norm', msg);
+          if(sev>=3){ this.chron(msg.replace(/<[^>]+>/g,'')); S.stability=clamp(S.stability-1.5,0,100); }
+        }
+      }
       // ── 임계 도달: 모드 이행 (고정 시 억제) ──
       if(!this.estateLock && this.estatePressure>0.55 && rnd()<PACE.shift){
         const next = { estates:'census', serf:'census', caste:'census',
@@ -6607,6 +6744,17 @@ const UI={
       <div style="flex:1;height:9px;border-radius:5px;background:rgba(120,140,180,0.12);overflow:hidden">
         <div style="width:${p*100}%;height:100%;background:${pc}"></div></div>
       <span style="font-family:var(--mono);font-size:10px;color:${pc}">${(p*100).toFixed(0)}%</span></div>`;
+    // 압력 구성 요소 분해
+    const F=s._estFactors;
+    if(F){
+      const items=[['부르주아 성장',F.bourg],['교육 수준',F.edu],['도시화',F.urban],['박탈감',F.resent],['자연 감쇠',F.decay]];
+      html+='<div style="margin-top:7px;padding:7px 9px;border-radius:7px;background:rgba(120,140,180,0.06)">';
+      html+='<div style="font-size:9px;color:var(--tx3);margin-bottom:4px">압력 구성 요소</div>';
+      html+=items.map(([k,v])=>`<div style="display:flex;font-size:9.5px;padding:1px 0">
+        <span style="flex:1;color:var(--tx3)">${k}</span>
+        <span style="font-family:var(--mono);color:${v>=0?'var(--tx2)':'#8fa3c8'}">${v>=0?'+':''}${v.toFixed(3)}</span></div>`).join('');
+      html+='</div>';
+    }
     html+=`<label class="cChk" style="font-size:10.5px;margin-top:9px"><input type="checkbox" id="estateLockTog" ${s.estateLock?'checked':''}>신분제 상태 고정 — 혁명·개혁으로 모드가 바뀌지 않는다</label>`;
 
     // ── 신분별 상세 통계표 ──
@@ -6676,6 +6824,7 @@ const UI={
       <span style="font-size:11.5px;color:var(--tx2)">${REGION_NAMES[s.region[i]]||''}</span>
       <span style="font-size:11px;color:var(--tx3)">${INDUSTRY_LABEL[REGION_TRAITS[s.region[i]].ind]||''} 지역</span>
       ${p?`<span style="font-size:11.5px;color:${p.color}">▸ ${p.name} 지지</span>`:'<span style="font-size:11.5px;color:var(--tx3)">▸ 무당층</span>'}
+      ${s.estateOn?`<span style="font-size:10px;padding:1px 7px;border-radius:5px;background:${ESTATE_COL[s.estate[i]]}22;color:${ESTATE_COL[s.estate[i]]}">${ESTATE_NAME[s.estate[i]]}${s.canVote(i)?'':' · 참정권 없음'}</span>`:''}
       ${pinned?'<span style="font-size:9.5px;padding:1px 7px;border-radius:5px;background:rgba(255,180,77,0.15);color:var(--am)">추적 중</span>':''}
     </div>`;
     html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">';
@@ -6731,6 +6880,32 @@ const UI={
           <div style="font-size:11px;color:var(--tx3)">총선 ${e.elections}회 · 평균 유효정당수 ${e.enp.toFixed(1)} · 구분 사유: ${e.reason}</div>
         </div>`).join('')
         : '<div class="muted" style="font-size:11px">아직 시대를 나눌 만큼 역사가 쌓이지 않았다.</div>';
+    }
+    // 신분제 연대기
+    const esp=$('#estateStoryPanel'), esb=$('#estateStory');
+    if(esp && esb){
+      if(!s.estateOn){ esp.style.display='none'; }
+      else {
+        esp.style.display='block';
+        const cnt=s.estateCounts(), tot=cnt.reduce((a,b)=>a+b,0)||1;
+        const M=(ESTATE_MODE[s.estateMode]||{}).label||'';
+        const enf=s.enfranchisedRatio();
+        const st=[0,1,2,3,4].map(()=>({n:0,r:0,t:0}));
+        for(let i=0;i<N;i++){ if(s.age[i]<18)continue; const x=st[s.estate[i]]; x.n++; x.r+=s.resentment[i]; x.t+=s.trust[i]; }
+        const lowRes = st[3].n? (st[3].r/st[3].n) : 0;
+        const privTr = (st[0].n+st[1].n)? ((st[0].t+st[1].t)/(st[0].n+st[1].n)) : 0;
+        const evs=s.chronicle.filter(c=>/신분제|시민혁명|참정권|봉기|농노/.test(c.t)).slice(0,8);
+        esb.innerHTML=`<div style="font-size:12px;color:var(--tx2);line-height:1.85">
+          현재 <b style="color:var(--tx)">${M}</b> 체제이며, 성인 중 <b>${(enf*100).toFixed(0)}%</b>가 투표권을 갖는다.
+          인구의 <b>${((cnt[0]+cnt[1])/tot*100).toFixed(1)}%</b>인 성직자·귀족이 특권을 누리는 동안,
+          평민의 박탈감은 <b>${lowRes.toFixed(2)}</b>, 특권층의 체제신뢰는 <b>${privTr.toFixed(2)}</b>에 이른다.
+          부르주아는 인구의 <b>${(cnt[2]/tot*100).toFixed(1)}%</b>로 성장했다.
+          개혁 압력은 <b>${((s.estatePressure||0)*100).toFixed(0)}%</b>이다.
+        </div>`
+        + (evs.length? `<div style="margin-top:11px;border-top:1px solid rgba(130,170,255,0.12);padding-top:9px">`
+            + evs.map(c=>`<div style="font-size:11px;color:var(--tx2);padding:2px 0"><span style="font-family:var(--mono);color:var(--cy)">${c.y}년</span> ${c.t}</div>`).join('')
+            + `</div>`:'');
+      }
     }
     // 정권 교체 서사
     const th=$('#turnList');
@@ -7374,6 +7549,22 @@ const UI={
       }).join('')||'<div class="muted">지방의회 없음</div>';
       return;
     }
+    // ── 신분 분포(하층 비율) ──
+    if(mode==='estate'){
+      const low=new Array(NREG).fill(0), tot=new Array(NREG).fill(0);
+      for(let i=0;i<N;i++){ if(s.age[i]<18)continue; const r=s.region[i]; tot[r]++;
+        if(s.estate[i]>=3) low[r]++; }
+      for(let r=0;r<NREG;r++){ const el=$('#reg'+r); if(!el)continue;
+        const v = tot[r]? low[r]/tot[r] : 0;
+        const col = v>0.95?'#8b7355': v>0.9?'#9dff5a': v>0.85?'#54e0ff':'#b08cff';
+        el.setAttribute('fill',col); el.setAttribute('fill-opacity',(0.25+v*0.6).toFixed(2));
+        el.querySelector('title').textContent=`${REGION_NAMES[r]} — 평민·농노 ${(v*100).toFixed(1)}%`;
+      }
+      $('#mapLegend').innerHTML='<div class="lgRow"><div class="pdot" style="background:#b08cff"></div>특권층 많음</div>'
+        +'<div class="lgRow"><div class="pdot" style="background:#9dff5a"></div>평민 다수</div>'
+        +'<div class="lgRow"><div class="pdot" style="background:#8b7355"></div>하층 집중</div>';
+      return;
+    }
     // ── 분리 압력(중앙 불만) 히트맵 ──
     if(mode==='grievance' && s.localGovOn){
       for(let r=0;r<NREG;r++){ const el=$('#reg'+r); if(!el)continue;
@@ -7420,6 +7611,7 @@ const UI={
     const g=cv.getContext('2d'); g.setTransform(2,0,0,2,0,0);
     g.clearRect(0,0,w,h);
     const nolan=this.axisMode==='nolan';
+    const estMode=this.axisMode==='estate';
     // 투영 함수
     const projX = nolan? (cent=>{let x=0;for(let k=0;k<6;k++)x+=cent[k]*AXIS_ECON[k];return x;})
                        : (cent=>{let x=0;for(let k=0;k<6;k++)x+=cent[k]*s.pc1[k];return x;});
@@ -7437,8 +7629,12 @@ const UI={
     for(let i=0;i<N;i+=3){
       s.zvec(i,cz);
       const x=w/2+projX(cz)*sc, y=h/2-projY(cz)*sc;
-      const pid=s.party[i], p=pid>=0?s.parties.find(q=>q.id===pid):null;
-      g.fillStyle=p? p.color+'cc':'rgba(140,160,200,0.30)';
+      if(estMode){
+        g.fillStyle = (ESTATE_COL[s.estate[i]]||'#888')+'cc';
+      } else {
+        const pid=s.party[i], p=pid>=0?s.parties.find(q=>q.id===pid):null;
+        g.fillStyle=p? p.color+'cc':'rgba(140,160,200,0.30)';
+      }
       g.fillRect(x-1.4,y-1.4,2.8,2.8);
     }
     for(const p of s.parties){
@@ -7447,7 +7643,13 @@ const UI={
       g.beginPath();g.arc(x,y,9,0,7);g.stroke();
       g.fillStyle=p.color;g.font='10px sans-serif';g.fillText(p.name,x+12,y+3);
     }
-    if(nolan){
+    if(estMode){
+      $('#axX').textContent=s.pcLabel1; $('#axY').textContent=s.pcLabel2;
+      g.font='9px sans-serif'; let lx=6;
+      ESTATE_NAME.forEach((nm,i)=>{ g.fillStyle=ESTATE_COL[i]; g.fillRect(lx,6,7,7);
+        g.fillStyle='rgba(223,233,255,0.85)'; g.fillText(nm,lx+10,13); lx+=g.measureText(nm).width+22; });
+    }
+    else if(nolan){
       $('#axX').textContent='시장 ▶'; $('#axY').textContent='▲ 자유';
       // 사분면 라벨
       g.fillStyle='rgba(150,170,210,0.5)';g.font='9px sans-serif';
