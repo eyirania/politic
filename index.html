@@ -2842,6 +2842,26 @@ class Sim {
     for(let k=0;k<keep;k++) set[idx[k]]=1;
     this._sufElig=set;
   }
+  // 전체 시민 지지율 vs 실제 유권자 지지율의 괴리
+  suffrageBias(){
+    if(!this.estateOn) return null;
+    const all=new Map(), vot=new Map();
+    let at=0, vt=0;
+    for(let i=0;i<N;i++){
+      if(this.age[i]<this.con.voteAge||this.party[i]<0) continue;
+      const pid=this.party[i];
+      all.set(pid,(all.get(pid)||0)+1); at++;
+      if(this.canVote(i)){ const w=this.voteWeight(i); vot.set(pid,(vot.get(pid)||0)+w); vt+=w; }
+    }
+    const rows=[];
+    for(const p of this.parties){ if(p.id<0)continue;
+      const a=(all.get(p.id)||0)/Math.max(at,1)*100;
+      const v=(vot.get(p.id)||0)/Math.max(vt,1)*100;
+      if(a>0.5||v>0.5) rows.push({id:p.id,name:p.name,color:p.color,all:a,vote:v,gap:v-a});
+    }
+    rows.sort((x,y)=>y.vote-x.vote);
+    return rows;
+  }
   estateCounts(){
     const c=[0,0,0,0,0]; for(let i=0;i<N;i++){ if(this.age[i]<18)continue; c[this.estate[i]]++; }
     return c;
@@ -3519,11 +3539,28 @@ class Sim {
   // ── 상원 선거 ──
   senateElection(){
     const C=this.con; if(C.senate==='NONE') return;
-    // 상원 전용 투표 집계 (현 지지 기반)
     const votes=new Map(this.parties.map(p=>[p.id,0])); let cast=0;
-    for(let i=0;i<N;i++){ if(this.age[i]<C.voteAge||this.party[i]<0)continue;
-      const turnout=clamp(0.20+this.polInterest[i]*0.5+this.education[i]*0.15);
-      if(rnd()>=turnout)continue; votes.set(this.party[i],(votes.get(this.party[i])||0)+1); cast++; }
+    if(C.senate==='ESTATE'){
+      // ── 귀족원: 선거 없음. 특권 신분(성직자·귀족)의 정당 분포로 의석 구성 ──
+      for(let i=0;i<N;i++){
+        if(this.age[i]<C.voteAge||this.party[i]<0) continue;
+        const e=this.estateOn? this.estate[i] : 1;
+        if(e>1) continue;                       // 성직자(0)·귀족(1)만
+        const w = (e===1)? 3 : 2;               // 귀족 3, 성직자 2 가중
+        votes.set(this.party[i],(votes.get(this.party[i])||0)+w); cast+=w;
+      }
+      if(cast===0){ // 특권 신분이 없으면 최대 정당이 세습 의석을 독점
+        const big=[...this.parties].filter(p=>p.id>=0).sort((a,b)=>b.support-a.support)[0];
+        if(big){ votes.set(big.id, 1); cast=1; }
+      }
+    } else {
+      for(let i=0;i<N;i++){ if(this.age[i]<C.voteAge||this.party[i]<0)continue;
+        if(this.estateOn && !this.canVote(i)) continue;     // 신분제 참정권 반영
+        const turnout=clamp(0.20+this.polInterest[i]*0.5+this.education[i]*0.15);
+        if(rnd()>=turnout)continue;
+        const wv=this.estateOn? this.voteWeight(i):1;
+        votes.set(this.party[i],(votes.get(this.party[i])||0)+wv); cast+=wv; }
+    }
     this._runSenate(votes, cast);
     const senT=this.senate.reduce((a,s)=>a+s.seats,0);
     const govSen=this.senate.filter(s=>this.govCoalition.includes(s.id)).reduce((a,s)=>a+s.seats,0);
@@ -3547,6 +3584,16 @@ class Sim {
     let alloc=new Map();
     if(C.senate==='POPULAR'){
       alloc=this._allocPR(votes,T,cast,C.threshold);
+    } else if(C.senate==='ESTATE'){
+      // 귀족원: 특권 신분의 정당 분포로 세습 의석 배분 (봉쇄조항 없음)
+      const ent=[...votes.entries()].filter(([id,v])=>id>=0 && v>0);
+      if(ent.length){
+        const tv=ent.reduce((a,x)=>a+x[1],0)||1;
+        let used=0; const rema=[];
+        for(const [id,v] of ent){ const q=v/tv*T, fl=Math.floor(q); alloc.set(id,fl); used+=fl; rema.push([id,q-fl]); }
+        rema.sort((a,b)=>b[1]-a[1]);
+        for(let k=0; used<T && rema.length; k=(k+1)%rema.length){ alloc.set(rema[k][0],(alloc.get(rema[k][0])||0)+1); used++; }
+      }
     } else if(C.senate==='APPOINTED'){
       // 임명: 집권연합에 가중(현 정부가 채움)
       const gov=this.govCoalition.length?this.govCoalition:[[...this.parties].sort((a,b)=>b.support-a.support)[0]?.id].filter(x=>x!=null);
@@ -5596,6 +5643,14 @@ const UI={
     const gs=gov.reduce((a,p)=>a+p.seats,0);
     const cs=(s.confSupply||[]).map(id=>s.parties.find(p=>p.id===id)).filter(Boolean);
     const csSeats=cs.reduce((a,p)=>a+(p.seats||0),0);
+    if(s.estateOn){
+      const enf=s.enfranchisedRatio();
+      const em=(ESTATE_MODE[s.estateMode]||{}).label||'';
+      const eh=$('#headInfo');
+      if(eh) eh.insertAdjacentHTML('afterbegin',
+        `<div style="font-size:10.5px;color:var(--am);margin-bottom:3px">⚖ 신분제 <b>${em}</b> · 참정권 ${(enf*100).toFixed(0)}%`
+        + (s.con.senate==='ESTATE'? ' · 상원=귀족원':'') + `</div>`);
+    }
     $('#govInfo').innerHTML= gov.length
       ? `집권: ${gov.map(p=>`<span style="color:${p.color}">${p.name}</span>`).join(' + ')} (${gs}석)`
         + (cs.length? `<div style="font-size:10.5px;color:var(--tx3);margin-top:3px">각외 협력(신임과 공급): ${cs.map(p=>`<span style="color:${p.color}">${p.name}</span>`).join(', ')} +${csSeats}석</div>`:'')
@@ -5756,7 +5811,9 @@ const UI={
     const s=this.sim, P=s.lastPoll;
     if(!P){ $('#pollPanel').style.display='none'; return; }
     $('#pollPanel').style.display='block';
-    $('#pollD').textContent=`총선 D-${P.D}개월 · 오차 ±3.1%p`;
+    const enf = s.estateOn? s.enfranchisedRatio() : 1;
+    $('#pollD').innerHTML=`총선 D-${P.D}개월 · 오차 ±3.1%p`
+      + (enf<0.99? ` · <span style="color:var(--am)">유권자 ${(enf*100).toFixed(0)}%만 투표 — 민심과 결과가 다를 수 있다</span>`:'');
     const mx=Math.max(...P.vals.map(v=>v.v),1);
     $('#pollBars').innerHTML=P.vals.map(v=>
       `<div style="display:flex;align-items:center;gap:9px;margin-bottom:5px;font-size:11.5px">
@@ -6551,6 +6608,57 @@ const UI={
         <div style="width:${p*100}%;height:100%;background:${pc}"></div></div>
       <span style="font-family:var(--mono);font-size:10px;color:${pc}">${(p*100).toFixed(0)}%</span></div>`;
     html+=`<label class="cChk" style="font-size:10.5px;margin-top:9px"><input type="checkbox" id="estateLockTog" ${s.estateLock?'checked':''}>신분제 상태 고정 — 혁명·개혁으로 모드가 바뀌지 않는다</label>`;
+
+    // ── 신분별 상세 통계표 ──
+    const stat=[0,1,2,3,4].map(e=>({e,n:0,w:0,edu:0,vote:0,res:0}));
+    for(let i=0;i<N;i++){ if(s.age[i]<s.con.voteAge)continue;
+      const st=stat[s.estate[i]]; st.n++; st.w+=s.wealth[i]; st.edu+=s.education[i];
+      st.res+=s.resentment[i]; if(s.canVote(i)) st.vote++; }
+    html+='<div style="margin-top:12px;border-top:1px solid rgba(130,170,255,0.12);padding-top:9px">';
+    html+='<div style="font-size:9.5px;color:var(--tx3);letter-spacing:1px;margin-bottom:6px">신분별 현황</div>';
+    html+='<div style="display:flex;gap:6px;font-size:9px;color:var(--tx3);padding:0 0 3px 0"><span style="min-width:52px">신분</span><span style="min-width:38px">인구</span><span style="min-width:38px">자산</span><span style="min-width:38px">교육</span><span style="min-width:46px">참정권</span><span>박탈감</span></div>';
+    html+=stat.filter(x=>x.n>0).map(x=>{
+      const vp=x.n? x.vote/x.n*100:0;
+      const vc = vp>80?'#5ae0b4': vp>30?'#ffb24d':'#ff6262';
+      return `<div style="display:flex;gap:6px;align-items:center;font-size:10px;padding:2px 0;border-bottom:1px solid rgba(130,170,255,0.05)">
+        <span style="min-width:52px;color:${ESTATE_COL[x.e]}">${ESTATE_NAME[x.e]}</span>
+        <span style="min-width:38px;font-family:var(--mono);color:var(--tx2)">${(x.n/stat.reduce((a,b)=>a+b.n,0)*100).toFixed(1)}%</span>
+        <span style="min-width:38px;font-family:var(--mono);color:var(--tx3)">${(x.w/x.n).toFixed(2)}</span>
+        <span style="min-width:38px;font-family:var(--mono);color:var(--tx3)">${(x.edu/x.n).toFixed(2)}</span>
+        <span style="min-width:46px;font-family:var(--mono);color:${vc}">${vp.toFixed(0)}%</span>
+        <span style="font-family:var(--mono);color:${(x.res/x.n)>0.6?'var(--rd)':'var(--tx3)'}">${(x.res/x.n).toFixed(2)}</span>
+      </div>`;}).join('');
+    html+='</div>';
+
+    // ── 참정권 괴리: 전체 지지율 vs 실제 표 ──
+    const bias=s.suffrageBias();
+    if(bias && bias.length){
+      const big=bias.filter(r=>r.all>2||r.vote>2).slice(0,7);
+      html+='<div style="margin-top:12px;border-top:1px solid rgba(130,170,255,0.12);padding-top:9px">';
+      html+='<div style="font-size:9.5px;color:var(--tx3);letter-spacing:1px;margin-bottom:2px">참정권 괴리 — 민심과 표의 차이</div>';
+      html+='<div style="font-size:9px;color:var(--tx3);margin-bottom:6px">전체 시민 지지율(회색) 대비 실제 유권자 표(색). 격차가 클수록 민심이 왜곡된다.</div>';
+      html+=big.map(r=>{
+        const g=r.gap, gc = g>1?'#5ae0b4': g<-1?'#ff6262':'var(--tx3)';
+        return `<div style="display:flex;align-items:center;gap:7px;font-size:10px;margin-bottom:4px">
+          <div class="pdot" style="background:${r.color}"></div>
+          <span style="min-width:78px;color:var(--tx2)">${r.name}</span>
+          <div style="flex:1;position:relative;height:12px">
+            <div style="position:absolute;left:0;top:1px;height:4px;width:${Math.min(100,r.all)}%;background:rgba(140,160,200,0.45);border-radius:2px"></div>
+            <div style="position:absolute;left:0;top:7px;height:4px;width:${Math.min(100,r.vote)}%;background:${r.color};border-radius:2px"></div>
+          </div>
+          <span style="font-family:var(--mono);font-size:9px;color:var(--tx3);min-width:34px">${r.all.toFixed(1)}%</span>
+          <span style="font-family:var(--mono);font-size:9px;color:${gc};min-width:44px;text-align:right">${g>0?'+':''}${g.toFixed(1)}%p</span>
+        </div>`;}).join('');
+      html+='</div>';
+    }
+
+    // ── 귀족원 안내 ──
+    if(s.con.senate==='ESTATE'){
+      html+=`<div style="margin-top:11px;padding:8px 10px;border-radius:8px;background:rgba(176,140,255,0.10);border:1px solid rgba(176,140,255,0.3);font-size:10.5px;color:var(--tx2)">
+        <b style="color:#b08cff">귀족원 가동 중</b> — 상원이 선거가 아니라 성직자·귀족의 세습 의석으로 구성된다. 상원 권한 ${((s.con.senPower??0.5)*100).toFixed(0)}%.</div>`;
+    } else {
+      html+=`<div style="margin-top:11px;font-size:10px;color:var(--tx3)">헌법 에디터에서 상원 유형을 <b>귀족원(신분)</b>으로 바꾸면 상원이 특권 신분으로 구성된다.</div>`;
+    }
     host.innerHTML=html;
   },
   renderCitizen(){
