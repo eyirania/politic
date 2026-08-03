@@ -1167,6 +1167,12 @@ class Sim {
     this.estateMode = 'lords';     // 신분제 유형
     this.estateLock = false;       // 신분제 상태 고정(모드 자동 이행 금지)
     this.estatePace = 'normal';    // 개혁 속도(빠름/보통/느림)
+    this.regionSeceded = new Uint8Array(NREG);   // 이탈(독립)한 주
+    this.secessionStage = new Float32Array(NREG);// 분리 단계 0~5
+    this.regionPolicy = {};        // 주별 중앙 대응 이력
+    this.civilWar = null;          // 진행 중 내전
+    this.civilWarOn = true;        // 내전 허용 옵션
+    this.secReferendum = null;     // 진행 중 독립 국민투표
     this.suffrageCut = 0.35;       // 재산 제한 선거: 하위 비율 배제
     this.estatePressure = 0;       // 신분제 개혁 압력
     this.rigidity = 'rigid';       // 헌법 경직성: 'free' 즉시 | 'flex' 의회 표결 | 'rigid' 가중다수+국민투표
@@ -2213,6 +2219,8 @@ class Sim {
     if(this.tick%12===0) this.stepAmendmentPush();
     if(this.govForm==='ABSMON') this.stepAbsoluteMonarch();
     if(this.estateOn) this.stepEstate();
+    if(this.secReferendum) this._stepSecReferendum();
+    if(this.civilWar) this.stepCivilWar();
     if(this.pinnedCitizen>=0 && this.tick%6===0) this._logPinned();
     if(this.alliances.length) this._stepJointConvergence();
     if(this.blocsOn && this.tick%12===0) this._stepBlocs();
@@ -3882,19 +3890,231 @@ class Sim {
         const grow = (regFeel*0.5 + mismatch*0.35 - 0.32) * 0.06;
         this.stateGrievance[r]=clamp(this.stateGrievance[r]+grow,0,1);
         // 임계 초과 → 사건 (불만 높을수록 자주)
-        if(this.stateGrievance[r]>0.65 && rnd()<0.06+this.stateGrievance[r]*0.12){
-          if(this.federalPower>0.6 && this.stateGrievance[r]>0.8 && rnd()<0.5){
-            this.pushNews(4,'sev3',`<b>${REGION_NAMES[r]} 분리 독립 시도</b> — 자치정부, 중앙에 주권 이양 요구`);
-            this.chron(`${REGION_NAMES[r]} 분리 위기`);
-            S.stability=clamp(S.stability-8,0,100);
-          } else {
-            this.pushNews(3,'sev2',`<b>${REGION_NAMES[r]} 자치 확대 요구</b> — 대규모 지역 시위`);
-            this.chron(`${REGION_NAMES[r]} 자치 요구`);
-          }
-          this.stateGrievance[r]*=0.55;  // 분출 후 완화
-        }
+        this._stepSecession(r, S);
       }
     }
+  }
+  // ════════ 분리독립 5단계 에스컬레이션 ════════
+  _stepSecession(r, S){
+    if(this.regionSeceded[r]) return;
+    const G=this.stateGrievance[r];
+    const st=this.secessionStage;
+    // 단계 승격
+    const need=[0,0.50,0.62,0.75,0.86];
+    const cur=Math.floor(st[r]);
+    if(cur<4 && G>need[cur+1]) st[r]=cur+1;                 // 한 번에 한 단계씩
+    if(G<0.35 && st[r]>0) st[r]=Math.max(0, st[r]-0.02);    // 진정되면 후퇴
+    // 2단계 도달 즉시 지역 정당 창당 (확률 판정 이전)
+    if(st[r]>=2 && !this._hasRegionalParty(r) && this.parties.filter(p=>p.id>=0).length<this.maxParties){
+      this._spawnRegionalParty(r); this.stateGrievance[r]*=0.85; return;
+    }
+
+    if(rnd() > 0.05+G*0.10) return;
+    const nm=REGION_NAMES[r];
+
+    if(st[r]>=4 && !this.secReferendum){
+      // 4단계: 독립 국민투표 요구 → 중앙 대응
+      const resp = (this.milInfluence>0.35)? 'refuse' : (this.federalPower>0.55? 'allow':'negotiate');
+      if(resp==='allow'){
+        this.secReferendum={region:r, at:this.tick+6, poll:[]};
+        this.pushNews(4,'sev3',`<b>${nm} 독립 국민투표</b> 실시 합의 — 6개월 뒤 주민투표`);
+        this.chron(`${nm} 독립투표 합의`);
+      } else if(resp==='refuse'){
+        this.pushNews(4,'sev3',`중앙정부, <b>${nm} 독립투표 위헌 선언</b> — 자치정부 지도부 기소`);
+        this.chron(`${nm} 독립투표 금지`);
+        this.stateGrievance[r]=clamp(G*1.15+0.05,0,1);      // 억압 → 압력 상승
+        S.stability=clamp(S.stability-6,0,100);
+        if(G>0.82 && this.civilWarOn && rnd()<0.45) this._startCivilWar(r);
+      } else {
+        this.pushNews(3,'sev2',`중앙정부, <b>${nm}</b>에 대폭 자치권 이양 제안 — 협상 타결`);
+        this.chron(`${nm} 자치 협상 타결`);
+        this.stateGrievance[r]*=0.40;                        // 수용 → 크게 완화
+        st[r]=1;
+      }
+      return;
+    }
+    if(st[r]>=3){
+      this.pushNews(3,'sev2',`<b>${nm} 자치의회, 독립 주민투표 결의</b> — 중앙과 충돌 예고`);
+      this.chron(`${nm} 독립투표 결의`);
+      this.stateGrievance[r]=clamp(this.stateGrievance[r]*0.98+0.01,0,1);  // 무시 → 오히려 누적
+      S.stability=clamp(S.stability-3,0,100);
+      return;
+    }
+    if(st[r]>=2){
+      // 2단계: 지역 분리주의 정당 발생
+      if(!this._hasRegionalParty(r) && this.parties.filter(p=>p.id>=0).length<this.maxParties){
+        this._spawnRegionalParty(r);
+        this.stateGrievance[r]*=0.85;
+      } else {
+        this.pushNews(2,'sev2',`<b>${nm}</b> 자치 운동 조직화 — 대규모 지역 집회`);
+        this.stateGrievance[r]*=0.92;
+      }
+      return;
+    }
+    if(st[r]>=1){
+      this.pushNews(2,'norm',`<b>${nm} 자치 확대 요구</b> — 지역 시위 확산`);
+      this.stateGrievance[r]*=0.88;
+    }
+  }
+  // ── 중앙정부의 지역 대응 정책 ──
+  regionAction(kind){
+    // 가장 압력이 높은 미이탈 지역을 대상으로
+    let tr=-1, mx=-1;
+    for(let r=0;r<NREG;r++){ if(this.regionSeceded[r])continue;
+      if(this.stateGrievance[r]>mx){ mx=this.stateGrievance[r]; tr=r; } }
+    if(tr<0) return;
+    const nm=REGION_NAMES[tr], S=this.S;
+    if(kind==='autonomy'){
+      this.stateGrievance[tr]=clamp(this.stateGrievance[tr]*0.45,0,1);
+      this.secessionStage[tr]=Math.max(0,this.secessionStage[tr]-2);
+      this.federalPower=clamp((this.federalPower||0.5)+0.10,0,1);
+      for(let r=0;r<NREG;r++) if(r!==tr&&!this.regionSeceded[r]) this.stateGrievance[r]=clamp(this.stateGrievance[r]+0.05,0,1);
+      this.pushNews(3,'pos',`<b>${nm} 자치권 대폭 확대</b> — 분리 요구 진정, 타 지역도 요구 개시`);
+      this.chron(`${nm} 자치권 확대`);
+    } else if(kind==='fiscal'){
+      this.stateGrievance[tr]=clamp(this.stateGrievance[tr]*0.62,0,1);
+      S.economy*=0.985;
+      this.pushNews(3,'norm',`<b>${nm} 재정 지원 확대</b> — 이전 부담 조정, 국고 부담 증가`);
+      this.chron(`${nm} 재정 조정`);
+    } else if(kind==='culture'){
+      this.stateGrievance[tr]=clamp(this.stateGrievance[tr]*0.72,0,1);
+      for(let i=0;i<N;i+=2){ if(this.region[i]===tr) this.tribalism[i]=clamp(this.tribalism[i]-0.02); }
+      S.polarization=clamp(S.polarization+3,0,100);
+      this.pushNews(3,'norm',`<b>${nm} 언어·문화 자치 인정</b> — 민족주의 진영 반발`);
+      this.chron(`${nm} 문화 자치 인정`);
+    } else if(kind==='direct'){
+      this.stateGrievance[tr]=clamp(this.stateGrievance[tr]*1.25+0.08,0,1);
+      this.secessionStage[tr]=Math.max(0,this.secessionStage[tr]-1);
+      S.mediaFreedom=clamp(S.mediaFreedom-8,5,100);
+      if(this.demIndex!==undefined) this.demIndex=clamp(this.demIndex-6,0,100);
+      this.milInfluence=clamp((this.milInfluence||0)+0.08,0,1);
+      if(this.governors) this.governors[tr]=null;
+      this.pushNews(4,'sev3',`<b>${nm} 직접통치 선포</b> — 자치정부 해산, 중앙이 직할`);
+      this.chron(`${nm} 직접통치`);
+    }
+  }
+  _hasRegionalParty(r){ return this.parties.some(p=>p.id>=0 && p.sepRegion===r); }
+  // ── 3단계: 지역 분리주의 정당 ──
+  _spawnRegionalParty(r){
+    const cz=new Float64Array(6); let n=0;
+    const tmp=new Float64Array(6);
+    for(let i=0;i<N;i++){ if(this.region[i]!==r||this.age[i]<18)continue;
+      this.zvec(i,tmp); for(let k=0;k<6;k++)cz[k]+=tmp[k]; n++; if(n>500)break; }
+    if(!n) return;
+    for(let k=0;k<6;k++)cz[k]/=n;
+    cz[3]=clamp(cz[3]*1.2+0.5,-3,3);   // 부족주의(지역 정체성) 강화
+    const nm=REGION_NAMES[r];
+    const base=nm.replace(/(특별자치도|광역시|특별시|주|도|현|부|지구)$/,'').slice(0,4);
+    let name=this._normPartyName(base+pick(['민족당','자치당','독립당','국민당']));
+    if(this.parties.some(p=>p.name===name)) name=this._normPartyName('신'+name);
+    const np={ id:this.nextPartyId++, name, slogan:`${nm}의 일은 ${nm}이 정한다`,
+      color:this._pickColor(), cent:cz, anchor:Float64Array.from(cz), rad:0.45,
+      support:0, seats:0, founded:this.year(), lowStreak:0, home:r,
+      sepRegion:r, factions:null, leader:null };
+    this.parties.push(np);
+    // 그 지역 시민 상당수가 즉시 결집
+    let got=0;
+    for(let i=0;i<N;i++){ if(this.region[i]!==r||this.age[i]<18)continue;
+      if(rnd()<0.35+this.tribalism[i]*0.4){ this.party[i]=np.id; this.loyalty[i]=clamp(0.5+rnd()*0.3); got++; } }
+    this.pushNews(4,'sev2',`<b>${name} 창당</b> — ${nm} 분리주의 세력 결집 (지지자 ${got}명)`);
+    this.chron(`${name} 창당 — ${nm} 분리주의`);
+  }
+  // ── 독립 국민투표 진행 ──
+  _stepSecReferendum(){
+    const R=this.secReferendum; if(!R) return;
+    const r=R.region;
+    if(this.tick<R.at){
+      if(this.tick%2===0){
+        let y=0,t=0;
+        for(let i=0;i<N;i+=3){ if(this.region[i]!==r||this.age[i]<this.con.voteAge)continue;
+          t++; if(rnd()<clamp(0.30+this.tribalism[i]*0.5+this.stateGrievance[r]*0.4-this.trust[i]*0.3)) y++; }
+        R.poll.push(t? +(y/t*100).toFixed(1):50);
+        if(R.poll.length>30) R.poll.shift();
+      }
+      return;
+    }
+    let yes=0,tot=0;
+    for(let i=0;i<N;i++){ if(this.region[i]!==r||this.age[i]<this.con.voteAge)continue;
+      if(rnd()>clamp(0.55+this.polInterest[i]*0.4)) continue;
+      tot++; if(rnd()<clamp(0.30+this.tribalism[i]*0.5+this.stateGrievance[r]*0.4-this.trust[i]*0.3)) yes++; }
+    const pct=tot? yes/tot*100 : 0;
+    const nm=REGION_NAMES[r];
+    if(pct>50){
+      this.pushNews(4,'sev3',`<b>${nm} 독립 가결</b> — 찬성 ${pct.toFixed(1)}%`);
+      this.chron(`${nm} 독립투표 가결 (${pct.toFixed(0)}%)`);
+      // 중앙 수용 여부
+      if((this.milInfluence>0.3||this.federalPower<0.4) && this.civilWarOn && rnd()<0.55){ this._startCivilWar(r); }
+      else this._secede(r);
+    } else {
+      this.pushNews(4,'sev2',`<b>${nm} 독립 부결</b> — 찬성 ${pct.toFixed(1)}%, 연방 잔류`);
+      this.chron(`${nm} 독립투표 부결 (${pct.toFixed(0)}%)`);
+      this.stateGrievance[r]*=0.45;                 // 부결돼도 완전히 사라지진 않음
+      this.secessionStage[r]=1;
+    }
+    this.secReferendum=null;
+  }
+  // ── 5단계: 실제 분리 ──
+  _secede(r){
+    if(this.regionSeceded[r]) return;
+    this.regionSeceded[r]=1; this.secessionStage[r]=5; this.stateGrievance[r]=0;
+    const nm=REGION_NAMES[r];
+    // 인구 비중만큼 의석 축소
+    let cnt=0; for(let i=0;i<N;i++) if(this.region[i]===r) cnt++;
+    const share=cnt/N;
+    this.con.lowerSeats=Math.max(50, Math.round(this.con.lowerSeats*(1-share)));
+    this.S.economy*=(1-share*0.9);
+    // 지역 정당 정리
+    for(const p of this.parties){ if(p.sepRegion===r){ p.support=0; p.seats=0; } }
+    // 주지사·지방의회 제거
+    if(this.governors) this.governors[r]=null;
+    if(this.localAssemblies) this.localAssemblies=this.localAssemblies.filter(a=>a.region!==r);
+    this.pushNews(4,'sev3',`<b>${nm} 독립</b> — 연방에서 분리, 의석 ${this.con.lowerSeats}석으로 축소`);
+    this.chron(`${nm} 독립 — 국가 분열`);
+    this.S.stability=clamp(this.S.stability-20,0,100);
+    // 도미노: 다른 지역 압력 상승
+    for(let k=0;k<NREG;k++) if(!this.regionSeceded[k]) this.stateGrievance[k]=clamp(this.stateGrievance[k]+0.12,0,1);
+  }
+  // ── 6단계: 내전 ──
+  _startCivilWar(r){
+    if(this.civilWar) return;
+    const nm=REGION_NAMES[r];
+    let cnt=0; for(let i=0;i<N;i++) if(this.region[i]===r) cnt++;
+    this.civilWar={region:r, start:this.tick, rebelStr:cnt/N + this._regTribal(r)*0.3};
+    this.pushNews(4,'sev3',`<b>내전 발발</b> — ${nm} 분리군과 중앙군 교전 개시`);
+    this.chron(`${nm} 내전 발발`);
+    this.S.stability=clamp(this.S.stability-25,0,100);
+  }
+  stepCivilWar(){
+    const W=this.civilWar; if(!W) return;
+    const S=this.S, r=W.region;
+    S.economy*=0.996; S.stability=clamp(S.stability-0.35,0,100);
+    this.milInfluence=clamp((this.milInfluence||0)+0.004,0,1);
+    if(this.demIndex!==undefined) this.demIndex=clamp(this.demIndex-0.25,0,100);
+    // 사망(인구 감소 대리): 해당 지역 자산·신뢰 급락
+    if(this.tick%6===0) for(let i=0;i<N;i+=3){ if(this.region[i]!==r)continue;
+      this.wealth[i]=clamp(this.wealth[i]*0.99,0.01,8); this.trust[i]=clamp(this.trust[i]-0.02); }
+    const dur=this.tick-W.start;
+    if(dur<24 || rnd()>0.05) return;
+    // 승패: 중앙 군사력 vs 반군 규모
+    const central=(this.milInfluence||0.3)*0.6 + clamp(S.economy/120)*0.4;
+    const rebel=W.rebelStr*1.4;
+    const nm=REGION_NAMES[r];
+    if(central>rebel*1.15){
+      this.pushNews(4,'sev3',`<b>내전 종결</b> — 중앙군 승리, ${nm} 재통합`);
+      this.chron(`${nm} 내전 — 중앙 승리`);
+      this.stateGrievance[r]=clamp(this.stateGrievance[r]*0.5+0.25,0,1);
+      this.secessionStage[r]=1;
+      S.mediaFreedom=clamp(S.mediaFreedom-12,5,100);
+    } else if(rebel>central*1.15){
+      this.pushNews(4,'sev3',`<b>내전 종결</b> — ${nm} 분리군 승리, 독립 달성`);
+      this.chron(`${nm} 내전 — 분리 성공`);
+      this._secede(r);
+    } else {
+      this.pushNews(4,'sev3',`<b>내전 교착</b> — ${nm} 사실상 분단 상태로 고착`);
+      this.chron(`${nm} 분단 고착`);
+      this._secede(r);
+    }
+    this.civilWar=null;
   }
   _regTribal(r){ // 그 주 시민 평균 부족주의(지역 정서 대리)
     let s=0,n=0; for(let i=0;i<N;i+=4){ if(this.region[i]===r){s+=this.tribalism[i];n++;} }
@@ -4816,6 +5036,10 @@ class Sim {
         this.pushNews(2,'pos','<b>대사면·국민통합 선언</b> — 정치범 석방'); },
       martial:   ()=>{ S.stability=clamp(S.stability+14,0,100); this.unrest=clamp(this.unrest-20,0,100); samp('fear',0.10); S.mediaFreedom=clamp(S.mediaFreedom-16,0,100); this.milInfluence=clamp(this.milInfluence+12,0,100);
         this.pushNews(4,'sev3','<b>비상계엄 선포</b> — 군 병력 도심 전개'); this.chron('비상계엄'); },
+      autonomy:  ()=>this.regionAction('autonomy'),
+      fiscal:    ()=>this.regionAction('fiscal'),
+      culture:   ()=>this.regionAction('culture'),
+      direct:    ()=>this.regionAction('direct'),
       dissolve:  ()=>{ this.lastElection=this.tick-this.elecInterval;
         this.pushNews(3,'sev2','<b>의회 해산</b> — 조기 총선 실시'); this.chron('의회 해산·조기 총선'); },
     };
@@ -4916,6 +5140,7 @@ class Sim {
       elections:this.elections, govSince:this.govSince,
       form:this.govForm, pres:this.president, mon:this.monarch, king:this.king, cohab:this.cohabitation, grid:this.gridlock, lastAct:this.lastAct,
       refr:this.referendum, rigidity:this.rigidity, ideologyLock:this.ideologyLock, dynastyLock:this.dynastyLock, constPressure:this.constPressure,
+      regionSeceded:Array.from(this.regionSeceded), secessionStage:Array.from(this.secessionStage), civilWar:this.civilWar, civilWarOn:this.civilWarOn, secReferendum:this.secReferendum,
       estateOn:this.estateOn, estateMode:this.estateMode, estateLock:this.estateLock, estatePace:this.estatePace, suffrageCut:this.suffrageCut, estatePressure:this.estatePressure, amendSuper:this.amendSuper, refRecords:(this.refRecords||[]).slice(0,20), amendLog:(this.amendLog||[]).slice(0,20), maxP:this.maxParties, plock:this.partyLock, rlock:this.regimeLock,
       indep:this.independents, allies:this.alliances.map(a=>Object.assign({},a,{leader:undefined,leaderLid:a.leader?a.leader.lid:null})), nextAllyId:this.nextAllyId, autoAlly:this.autoAlliance, facOn:this.factionsOn, facTen:this.factionTension, blocsOn:this.blocsOn, blocs:this.blocs, B:this.B, preset:this.preset||'balanced',
       regio:this.regionalism, regC:this.regCount, con:this.con, senate:this.senate, senClass:this.senateClass,
@@ -4957,6 +5182,9 @@ class Sim {
     s.elections=d.elections||[]; s.govSince=d.govSince||0;
     s.govForm=d.form||'PARL'; s.president=d.pres||null; s.monarch=d.mon||null; s.king=d.king||null; s.cohabitation=!!d.cohab; s.gridlock=!!d.grid;
     s.lastAct=d.lastAct??-99; s.country=d.country||'신생 공화국'; s.referendum=d.refr||null; if(d.rigidity)s.rigidity=d.rigidity; if(d.ideologyLock!==undefined)s.ideologyLock=d.ideologyLock; if(d.dynastyLock!==undefined)s.dynastyLock=d.dynastyLock; if(d.constPressure!==undefined)s.constPressure=d.constPressure;
+    if(d.regionSeceded)s.regionSeceded=Uint8Array.from(d.regionSeceded);
+    if(d.secessionStage)s.secessionStage=Float32Array.from(d.secessionStage);
+    s.civilWar=d.civilWar||null; if(d.civilWarOn!==undefined)s.civilWarOn=d.civilWarOn; s.secReferendum=d.secReferendum||null;
     if(d.estateOn!==undefined)s.estateOn=d.estateOn; if(d.estateMode)s.estateMode=d.estateMode;
     if(d.estateLock!==undefined)s.estateLock=d.estateLock; if(d.estatePace)s.estatePace=d.estatePace; if(d.suffrageCut!==undefined)s.suffrageCut=d.suffrageCut;
     if(d.estatePressure!==undefined)s.estatePressure=d.estatePressure; if(d.amendSuper)s.amendSuper=d.amendSuper; s.refRecords=d.refRecords||[]; s.amendLog=d.amendLog||[];
