@@ -648,6 +648,11 @@ canvas.chart.tall{height:210px}
             <div class="panel lm"><h3>인구 구조 — 연령 분포</h3><canvas class="chart tall" id="chPyr"></canvas></div>
             <div class="panel mg"><h3>자산 분포 — 부는 어디에 쌓이는가</h3><canvas class="chart tall" id="chWealth"></canvas></div>
           </div>
+          <div class="panel" style="margin-top:14px" id="estatePanel">
+            <h3>신분제 — 법 앞의 불평등
+              <label class="cChk" style="margin-left:auto;font-size:10px;gap:5px"><input type="checkbox" id="estateTog">신분제</label></h3>
+            <div id="estateBody"></div>
+          </div>
           <div class="panel am" style="margin-top:14px" id="citizenPanel">
             <h3>시민 한 사람 — 통계 뒤의 인생
               <button class="sysBtn" id="citPick" style="margin-left:auto">🎲 무작위</button>
@@ -1045,7 +1050,26 @@ const FORMNAME = { PARL:'의원내각제', PRES:'대통령제', SEMI:'이원집�
 const METHODNAME = { FPTP:'소선거구 단순다수', RUNOFF:'결선투표제', PR:'정당명부 비례', MMP:'연동형 비례', PARALLEL:'병립형 혼합', SNTV:'중선거구 단기非이양' };
 const METHOD_KEYS = ['FPTP','RUNOFF','SNTV','PARALLEL','MMP','PR'];
 // 상원 선출
-const SENNAME = { NONE:'없음(단원제)', FEDERAL:'연방 주별 균등', POPULAR:'전국 직선 비례', APPOINTED:'간선·임명' };
+const SENNAME = { NONE:'없음(단원제)', FEDERAL:'연방 주별 균등', POPULAR:'전국 직선 비례', APPOINTED:'간선·임명', ESTATE:'귀족원(신분)' };
+// ── 신분제 ──
+const ESTATE_NAME = ['성직자','귀족','부르주아','평민','농노'];
+const ESTATE_COL  = ['#c9a227','#b08cff','#54e0ff','#9dff5a','#8b7355'];
+// 신분제 개혁 속도: 압력 증가율 + 이행 확률
+const ESTATE_PACE = {
+  fast:   {label:'빠름', rate:0.30, decay:0.004,  shift:0.18,  widen:0.12,  desc:'약 115년 · 1배속 10분'},
+  normal: {label:'보통', rate:0.12, decay:0.0016, shift:0.072, widen:0.048, desc:'약 230년 · 1배속 21분'},
+  slow:   {label:'느림', rate:0.08, decay:0.0012, shift:0.035, widen:0.024, desc:'약 450년 · 1배속 40분+'},
+};
+const ESTATE_MODE = {
+  none:    {label:'없음', desc:'모든 시민이 법적으로 평등하고 보통선거가 시행된다.'},
+  lords:   {label:'잔존 신분제(귀족원)', desc:'하원은 보통선거, 상원은 세습 귀족. 귀족원 권한 축소가 갈등축이 된다.'},
+  census:  {label:'재산 제한 선거', desc:'자산 하위 계층은 투표권이 없다. 참정권 확대가 정치의 중심 의제가 된다.'},
+  weighted:{label:'차등 선거(계급별 가중)', desc:'모두 투표하나 납세액에 따라 표의 무게가 다르다. 형식은 민주, 실질은 과두정.'},
+  estates: {label:'등족회의(삼부회)', desc:'성직자·귀족·평민이 각각 원을 이룬다. 신분별 표결이면 평민은 1/3 표만 갖는다.'},
+  caste:   {label:'신분 고착(카스트)', desc:'신분 이동이 거의 불가능하다. 안정적이나 유능한 하위 신분이 배제된다.'},
+  serf:    {label:'농노제 병존', desc:'일부 인구가 인신의 자유를 갖지 못한다. 지역 갈등과 결합한다.'},
+  theo:    {label:'성직 신정', desc:'성직 신분이 최상위이며 종교 기구가 입법 거부권을 갖는다.'},
+};
 // 의석 배치용 좌↔우 고정축 (표시 라벨일 뿐, 시민 행동에는 미사용)
 // [openness, fear, conformity, tribalism, resentment, trust] — 양수=우
 const AXIS_LR = [-0.7, 0.3, 0.5, 0.6, -0.8, 0.1];
@@ -1135,6 +1159,12 @@ class Sim {
     this.voteRecords = [];         // 법안 표결 기록
     this.ideologyLock = false;     // 정당 이념 고정(창당 좌표 근처 유지)
     this.dynastyLock = false;      // 왕조 고정(교체·붕괴 없이 계속 계승)
+    this.estateOn = false;         // 신분제 (기본 꺼짐)
+    this.estateMode = 'lords';     // 신분제 유형
+    this.estateLock = false;       // 신분제 상태 고정(모드 자동 이행 금지)
+    this.estatePace = 'normal';    // 개혁 속도(빠름/보통/느림)
+    this.suffrageCut = 0.35;       // 재산 제한 선거: 하위 비율 배제
+    this.estatePressure = 0;       // 신분제 개혁 압력
     this.rigidity = 'rigid';       // 헌법 경직성: 'free' 즉시 | 'flex' 의회 표결 | 'rigid' 가중다수+국민투표
     this.amendSuper = 2/3;         // 개헌 의회 가중다수 요건
     this.pinnedCitizen = -1;       // 추적 중인 시민
@@ -1192,6 +1222,7 @@ class Sim {
     this.party=new Int16Array(N).fill(-1);
     this.loyalty=F(N);
     this.partyID=F(N);   // 정당일체감(Campbell): 큰 정당에 누적 충성 — 死票 학습
+    this.estate=new Int8Array(N).fill(3);   // 신분(0성직 1귀족 2부르주아 3평민 4농노)
     this.retroEval=F(N); // 회고적 투표: 집권 성과 평가 (-1~+1)
     this.adaptCost=F(N); // 기술 변화 적응 비용 누적
 
@@ -1213,6 +1244,15 @@ class Sim {
     this.wealth[i] = parent>=0 ? clamp(this.wealth[parent]*lerp(0.6,1.1,rnd()),0.02,4) : w;
     this.education[i] = clamp(gauss(0.45+0.12*Math.log(this.wealth[i]+1),0.18));
     this.income[i] = clamp(this.wealth[i]*0.4 + this.education[i]*0.4 + gauss(0,0.1), 0.02, 3);
+    // 신분: 부모에게 세습, 없으면 자산 기반 확률 배정
+    if(parent>=0) this.estate[i]=this.estate[parent];
+    else {
+      const w=this.wealth[i], r=rnd();
+      if(r<0.015) this.estate[i]=0;                       // 성직자 1.5%
+      else if(r<0.015+0.035*clamp(w/2)) this.estate[i]=1; // 귀족(부유할수록)
+      else if(w>1.2 && rnd()<0.45) this.estate[i]=2;      // 부르주아
+      else this.estate[i]= (w<0.25 && rnd()<0.25)? 4 : 3; // 농노 or 평민
+    }
     this.jobSec[i] = clamp(gauss(0.6,0.2));
     this.mobility[i]= clamp(gauss(0.5,0.2));
     // 심리: 전부 중립 분포에서 출발. 부모가 있으면 약하게 상속(가정 사회화) + 잡음.
@@ -2165,6 +2205,7 @@ class Sim {
     if(this.tick%4===0) this.stepDefections();
     if(this.tick%12===0) this.stepAmendmentPush();
     if(this.govForm==='ABSMON') this.stepAbsoluteMonarch();
+    if(this.estateOn) this.stepEstate();
     if(this.pinnedCitizen>=0 && this.tick%6===0) this._logPinned();
     if(this.alliances.length) this._stepJointConvergence();
     if(this.blocsOn && this.tick%12===0) this._stepBlocs();
@@ -2765,6 +2806,123 @@ class Sim {
     this.chron(`개헌 국민투표 발의: ${label}`);
     return true;
   }
+  // ════════ 신분제 ════════
+  // 투표 자격: 모드에 따라 신분·재산 조건이 붙는다
+  canVote(i){
+    if(this.age[i]<this.con.voteAge) return false;
+    if(!this.estateOn) return true;
+    const m=this.estateMode, e=this.estate[i];
+    if(m==='serf'  && e===4) return false;           // 농노는 참정권 없음
+    if(m==='caste' && e===4) return false;
+    if(m==='theo'  && this.trust[i]<0.25) return false;  // 신정: 체제 불신자는 후보·투표 배제
+    if(m==='census'){
+      if(e===4) return false;
+      return this._sufElig? !!this._sufElig[i] : true;   // 자산 순위 기반 제한
+    }
+    if(m==='estates') return e!==4;                   // 등족회의: 농노 제외
+    return true;                                       // lords/weighted/none: 보통선거
+  }
+  // 표의 무게 (차등 선거)
+  voteWeight(i){
+    if(!this.estateOn) return 1;
+    if(this.estateMode!=='weighted') return 1;
+    const e=this.estate[i];
+    if(e===0||e===1) return 3;          // 특권 신분 3표
+    if(e===2) return 2;                  // 부르주아 2표
+    return 1;
+  }
+  // 재산 제한선 갱신(하위 suffrageCut 비율 배제)
+  _updateSuffrageThreshold(){
+    if(!this.estateOn || this.estateMode!=='census'){ this._sufElig=null; return; }
+    // 자산 순위 기반: 상위 (1 - suffrageCut) 비율에게만 참정권
+    const idx=[]; for(let i=0;i<N;i++){ if(this.age[i]>=this.con.voteAge) idx.push(i); }
+    idx.sort((a,b)=>this.wealth[b]-this.wealth[a]);        // 부유한 순
+    const keep=Math.max(1, Math.round(idx.length*(1-clamp(this.suffrageCut,0,0.95))));
+    const set=new Uint8Array(N);
+    for(let k=0;k<keep;k++) set[idx[k]]=1;
+    this._sufElig=set;
+  }
+  estateCounts(){
+    const c=[0,0,0,0,0]; for(let i=0;i<N;i++){ if(this.age[i]<18)continue; c[this.estate[i]]++; }
+    return c;
+  }
+  enfranchisedRatio(){
+    let a=0,v=0; for(let i=0;i<N;i++){ if(this.age[i]<this.con.voteAge)continue; a++; if(this.canVote(i))v++; }
+    return a? v/a : 1;
+  }
+  stepEstate(){
+    if(!this.estateOn) return;
+    this._updateSuffrageThreshold();
+    const S=this.S, m=this.estateMode;
+    // ── 특권 신분의 조세 면제 → 평민 박탈감 ──
+    const privileged = (m==='estates'||m==='caste'||m==='serf'||m==='theo');
+    if(privileged && this.tick%6===0){
+      for(let i=0;i<N;i+=2){
+        const e=this.estate[i];
+        if(e>=2) this.resentment[i]=clamp(this.resentment[i]+0.0035);   // 세금 전담
+        else this.trust[i]=clamp(this.trust[i]+0.002);                   // 특권층은 체제 만족
+      }
+    }
+    // ── 참정권 배제에 따른 불만 ──
+    if(m==='census'||m==='weighted'||m==='estates'||m==='serf'||m==='caste'){
+      if(this.tick%6===0) for(let i=0;i<N;i+=2){
+        if(this.age[i]<this.con.voteAge) continue;
+        if(!this.canVote(i)) this.resentment[i]=clamp(this.resentment[i]+0.004);
+        else if(this.voteWeight(i)<2 && m==='weighted') this.resentment[i]=clamp(this.resentment[i]+0.002);
+      }
+    }
+    // ── 개혁 압력: 부르주아 성장 + 교육 + 도시화 ──
+    if(this.tick%12===0){
+      const cnt=this.estateCounts(); const tot=cnt.reduce((a,b)=>a+b,0)||1;
+      const bourg=cnt[2]/tot;                       // 부르주아 비중
+      const drive = this.mean('education')*0.35 + S.urbanization/100*0.25 + bourg*1.2
+                  + this.mean('resentment')*0.3;
+      const PACE = ESTATE_PACE[this.estatePace] || ESTATE_PACE.normal;
+      let dP = Math.max(0,(drive-0.44))*PACE.rate;
+      if(m==='none') dP=0;
+      this.estatePressure = clamp((this.estatePressure||0) + dP - PACE.decay, 0, 1);
+      // ── 임계 도달: 모드 이행 (고정 시 억제) ──
+      if(!this.estateLock && this.estatePressure>0.55 && rnd()<PACE.shift){
+        const next = { estates:'census', serf:'census', caste:'census',
+                       census:'lords', weighted:'lords', theo:'lords', lords:'none' }[m];
+        if(next){
+          const violent = (m==='estates'||m==='serf'||m==='caste') && rnd()<0.5;
+          if(violent){
+            this.pushNews(4,'sev3',`<b>시민혁명</b> — 신분 특권 폐지, ${ESTATE_MODE[next].label}(으)로`);
+            this.chron(`시민혁명: 신분제 개편 → ${ESTATE_MODE[next].label}`);
+            S.stability=clamp(S.stability-16,0,100);
+            if(this.govForm==='ABSMON'){ this.govForm='PARL'; this.king=null; }
+          } else {
+            this.pushNews(4,'pos',`<b>신분제 개혁</b> — ${ESTATE_MODE[m].label} → ${ESTATE_MODE[next].label}`);
+            this.chron(`신분제 개혁: ${ESTATE_MODE[next].label}`);
+          }
+          this.estateMode=next; this.estatePressure=0.15;
+          if(next==='census') this.suffrageCut=Math.min(0.55,this.suffrageCut);
+          if(next==='none') this.estateOn=false;
+        }
+      }
+      // ── 재산 제한선의 점진 완화(참정권 확대) ──
+      if(!this.estateLock && m==='census' && this.estatePressure>0.4 && rnd()<PACE.widen){
+        const before=this.suffrageCut;
+        this.suffrageCut=Math.max(0, this.suffrageCut-0.12);
+        if(this.suffrageCut<before){
+          this.pushNews(3,'pos',`<b>선거법 개정</b> — 재산 요건 완화, 유권자 확대 (${((1-this.suffrageCut)*100).toFixed(0)}%)`);
+          this.chron(`참정권 확대: 유권자 ${((1-this.suffrageCut)*100).toFixed(0)}%`);
+          this.estatePressure=clamp(this.estatePressure-0.25,0,1);
+        }
+      }
+    }
+    // ── 신분 이동: 매관매직 / 몰락 ──
+    if(m!=='caste' && this.tick%24===0){
+      for(let i=0;i<N;i+=7){
+        const e=this.estate[i];
+        if(e===2 && this.wealth[i]>2.0 && rnd()<0.004) this.estate[i]=1;   // 매관매직
+        else if(e===1 && this.wealth[i]<0.3 && rnd()<0.006) this.estate[i]=2; // 몰락 귀족
+        else if(e===3 && this.wealth[i]>1.4 && rnd()<0.008) this.estate[i]=2; // 평민→부르주아
+        else if(e===4 && m!=='serf' && rnd()<0.01) this.estate[i]=3;         // 농노 해방
+      }
+    }
+  }
   // ════════ 전제군주정: 왕이 실제로 통치한다 ════════
   stepAbsoluteMonarch(){
     if(this.govForm!=='ABSMON') return;
@@ -3030,6 +3188,7 @@ class Sim {
     const viable=new Set(this.parties.filter(p=>p.support>=0.10).map(p=>p.id));
     for(let i=0;i<N;i++){
       if(this.age[i]<C.voteAge) continue;
+      if(this.estateOn && !this.canVote(i)) continue;     // 신분제: 참정권 제한
       let pid=this.party[i];
       if(pid<0){
         if(!this.independents || this.polInterest[i]<0.42 || rnd()>0.55) continue;
@@ -3037,7 +3196,8 @@ class Sim {
       }
       const turnout = clamp(0.22 + this.polInterest[i]*0.55 + this.education[i]*0.15 + (this.age[i]>40?0.08:0));
       if(rnd()>=turnout) continue;
-      votes.set(pid,(votes.get(pid)||0)+1); cast++;
+      const wv = this.estateOn? this.voteWeight(i) : 1;   // 차등 선거 가중치
+      votes.set(pid,(votes.get(pid)||0)+wv); cast+=wv;
       if(nd){
         let dv=pid;
         if(strategic && !viable.has(pid)){
@@ -3054,7 +3214,7 @@ class Sim {
         const t=dTally[this.district[i]];
         if(t){ const pp=dv>=0?this.parties.find(q=>q.id===dv):null;
           const q = (pp&&pp.nomQ)? pp.nomQ[this.region[i]] : 0.5;
-          t.set(dv,(t.get(dv)||0) + 1 + (q-0.5)*0.24); }   // 개인 투표(인물 효과) ±12%
+          t.set(dv,(t.get(dv)||0) + wv + (q-0.5)*0.24); }   // 개인 투표(인물 효과) ±12%
       }
     }
     // 부정선거
@@ -4571,7 +4731,8 @@ class Sim {
       fair:this.electionFair, unrest:this.unrest, S:this.S,
       elections:this.elections, govSince:this.govSince,
       form:this.govForm, pres:this.president, mon:this.monarch, king:this.king, cohab:this.cohabitation, grid:this.gridlock, lastAct:this.lastAct,
-      refr:this.referendum, rigidity:this.rigidity, ideologyLock:this.ideologyLock, dynastyLock:this.dynastyLock, constPressure:this.constPressure, amendSuper:this.amendSuper, refRecords:(this.refRecords||[]).slice(0,20), amendLog:(this.amendLog||[]).slice(0,20), maxP:this.maxParties, plock:this.partyLock, rlock:this.regimeLock,
+      refr:this.referendum, rigidity:this.rigidity, ideologyLock:this.ideologyLock, dynastyLock:this.dynastyLock, constPressure:this.constPressure,
+      estateOn:this.estateOn, estateMode:this.estateMode, estateLock:this.estateLock, estatePace:this.estatePace, suffrageCut:this.suffrageCut, estatePressure:this.estatePressure, amendSuper:this.amendSuper, refRecords:(this.refRecords||[]).slice(0,20), amendLog:(this.amendLog||[]).slice(0,20), maxP:this.maxParties, plock:this.partyLock, rlock:this.regimeLock,
       indep:this.independents, allies:this.alliances.map(a=>Object.assign({},a,{leader:undefined,leaderLid:a.leader?a.leader.lid:null})), nextAllyId:this.nextAllyId, autoAlly:this.autoAlliance, facOn:this.factionsOn, facTen:this.factionTension, blocsOn:this.blocsOn, blocs:this.blocs, B:this.B, preset:this.preset||'balanced',
       regio:this.regionalism, regC:this.regCount, con:this.con, senate:this.senate, senClass:this.senateClass,
       country:this.country, partyLog:this.partyLog, lastFound:this.lastFound,
@@ -4599,7 +4760,7 @@ class Sim {
          resentment:arr(this.resentment),trust:arr(this.trust),aggression:arr(this.aggression),
          polInterest:arr(this.polInterest),radical:arr(this.radical),
          region:arr(this.region),culture:arr(this.culture),party:arr(this.party),loyalty:arr(this.loyalty),
-         adaptCost:arr(this.adaptCost),partyID:arr(this.partyID),retroEval:arr(this.retroEval)},
+         adaptCost:arr(this.adaptCost),partyID:arr(this.partyID),retroEval:arr(this.retroEval),estate:arr(this.estate)},
     });
   }
   static deserialize(json){
@@ -4611,7 +4772,10 @@ class Sim {
     s.nextPartyId=d.nextPartyId; s.govCoalition=d.gov; s.lastElection=d.lastElection; s.lastSenate=d.lastSenate??-999;
     s.elections=d.elections||[]; s.govSince=d.govSince||0;
     s.govForm=d.form||'PARL'; s.president=d.pres||null; s.monarch=d.mon||null; s.king=d.king||null; s.cohabitation=!!d.cohab; s.gridlock=!!d.grid;
-    s.lastAct=d.lastAct??-99; s.country=d.country||'신생 공화국'; s.referendum=d.refr||null; if(d.rigidity)s.rigidity=d.rigidity; if(d.ideologyLock!==undefined)s.ideologyLock=d.ideologyLock; if(d.dynastyLock!==undefined)s.dynastyLock=d.dynastyLock; if(d.constPressure!==undefined)s.constPressure=d.constPressure; if(d.amendSuper)s.amendSuper=d.amendSuper; s.refRecords=d.refRecords||[]; s.amendLog=d.amendLog||[];
+    s.lastAct=d.lastAct??-99; s.country=d.country||'신생 공화국'; s.referendum=d.refr||null; if(d.rigidity)s.rigidity=d.rigidity; if(d.ideologyLock!==undefined)s.ideologyLock=d.ideologyLock; if(d.dynastyLock!==undefined)s.dynastyLock=d.dynastyLock; if(d.constPressure!==undefined)s.constPressure=d.constPressure;
+    if(d.estateOn!==undefined)s.estateOn=d.estateOn; if(d.estateMode)s.estateMode=d.estateMode;
+    if(d.estateLock!==undefined)s.estateLock=d.estateLock; if(d.estatePace)s.estatePace=d.estatePace; if(d.suffrageCut!==undefined)s.suffrageCut=d.suffrageCut;
+    if(d.estatePressure!==undefined)s.estatePressure=d.estatePressure; if(d.amendSuper)s.amendSuper=d.amendSuper; s.refRecords=d.refRecords||[]; s.amendLog=d.amendLog||[];
     s.maxParties=d.maxP||7; s.partyLock=!!d.plock; s.regimeLock=!!d.rlock;
     s.alliances=d.allies||[]; s.nextAllyId=d.nextAllyId||1;
     s._allyRelink=true; if(d.autoAlly!==undefined)s.autoAlliance=d.autoAlly;
@@ -4755,7 +4919,20 @@ const UI={
       if(e.target.id==='distMore'){ this.distShown=(this.distShown||25)+25; this.renderDistricts(); return; }
     });
     if($('#distPartyFilt')) $('#distPartyFilt').onchange=()=>{ this.distShown=25; this.renderDistricts(); };
+    document.addEventListener('change',e=>{
+      if(e.target.id==='estateTog'){ this.sim.estateOn=e.target.checked;
+        this.sim.pushNews(1,'norm', e.target.checked?'<b>신분제 도입</b> — 법 앞의 평등이 사라진다':'신분제 폐지 — 보통선거 시행');
+        if(e.target.checked) this.sim._updateSuffrageThreshold();
+        this.render(true); }
+      if(e.target.id==='estateLockTog'){ this.sim.estateLock=e.target.checked; }
+    });
+    document.addEventListener('input',e=>{ if(e.target.id==='sufSl'){
+      this.sim.suffrageCut=+e.target.value/100; this.sim._updateSuffrageThreshold(); this.renderEstate(); } });
     document.addEventListener('click',e=>{
+      const ep=e.target.closest('[data-epace]');
+      if(ep){ this.sim.estatePace=ep.dataset.epace; this.renderEstate(); return; }
+      const em=e.target.closest('[data-emode]');
+      if(em){ this.sim.estateMode=em.dataset.emode; this.sim._updateSuffrageThreshold(); this.renderEstate(); return; }
       if(e.target.id==='citPick'){ this._citIdx=this.sim.randomCitizen(); this.renderCitizen(); return; }
       if(e.target.id==='citPin'){ if(this._citIdx>=0){ this.sim.pinCitizen(this._citIdx); this.renderCitizen(); } return; }
     });
@@ -5185,7 +5362,7 @@ const UI={
         {data:s.hist.trust,color:'#54e0ff',label:'체제신뢰'},
         {data:s.hist.rad,color:'#ff6262',label:'급진화'}],0,100);
       drawLine($('#chGen'),s.hist.gen,'#9dff5a',0,100);
-      this.renderPyramid(); this.renderWealth(); this.renderScatter(); this.renderCitizen();
+      this.renderPyramid(); this.renderWealth(); this.renderScatter(); this.renderCitizen(); this.renderEstate();
     }
     if(page==='page-map'){ this.renderMap(); this.renderRegSup(); this.renderRegTraits(); this.renderGovPanel(); this.syncRegio(); }
     if(page==='page-hist') this.renderHistView();
@@ -6324,6 +6501,56 @@ const UI={
     </div>`).join('')+'</div>';
     if(risks.length) html+=`<div style="margin-top:10px;padding:7px 10px;border-radius:8px;background:rgba(255,98,98,0.1);border:1px solid rgba(255,98,98,0.3);font-size:11px;color:#ff8c8c">⚠ ${risks.join(' · ')}</div>`;
     else html+='<div style="margin-top:9px;font-size:10.5px;color:var(--tx3)">체제 위기 신호 없음</div>';
+    host.innerHTML=html;
+  },
+  renderEstate(){
+    const s=this.sim, host=$('#estateBody'); if(!host)return;
+    if($('#estateTog')) $('#estateTog').checked=s.estateOn;
+    if(!s.estateOn){
+      host.innerHTML='<div class="muted" style="font-size:11px">신분제가 꺼져 있다 — 모든 시민이 법적으로 평등하고 보통선거가 시행된다.</div>';
+      return;
+    }
+    const cnt=s.estateCounts(), tot=cnt.reduce((a,b)=>a+b,0)||1;
+    const M=ESTATE_MODE[s.estateMode]||ESTATE_MODE.lords;
+    let html=`<div class="chipBar" style="margin-bottom:8px">${Object.entries(ESTATE_MODE).filter(([k])=>k!=='none').map(([k,v])=>
+      `<button class="tchip ${s.estateMode===k?'on':'off'}" data-emode="${k}">${v.label}</button>`).join('')}</div>`;
+    html+=`<div class="cHint" style="margin:0 0 9px 0">${M.desc}</div>`;
+    // 신분 분포
+    html+='<div style="display:flex;height:16px;border-radius:8px;overflow:hidden;margin-bottom:6px">';
+    html+=cnt.map((c,i)=>c>0?`<div style="flex:${c};background:${ESTATE_COL[i]}" title="${ESTATE_NAME[i]} ${(c/tot*100).toFixed(1)}%"></div>`:'').join('')+'</div>';
+    html+='<div style="display:flex;gap:10px;flex-wrap:wrap;font-size:10px;color:var(--tx3);margin-bottom:10px">'+
+      cnt.map((c,i)=>c>0?`<span><span style="display:inline-block;width:7px;height:7px;border-radius:2px;background:${ESTATE_COL[i]};margin-right:4px"></span>${ESTATE_NAME[i]} ${(c/tot*100).toFixed(1)}%</span>`:'').join('')+'</div>';
+    // 참정권
+    const enf=s.enfranchisedRatio();
+    const ec = enf>0.8?'#5ae0b4': enf>0.5?'#ffb24d':'#ff6262';
+    html+=`<div style="display:flex;align-items:center;gap:9px;font-size:11px;margin-bottom:6px">
+      <span style="min-width:64px;color:var(--tx3)">참정권 보유</span>
+      <div style="flex:1;height:9px;border-radius:5px;background:rgba(120,140,180,0.12);overflow:hidden">
+        <div style="width:${enf*100}%;height:100%;background:${ec}"></div></div>
+      <span style="font-family:var(--mono);font-size:10px;color:${ec}">${(enf*100).toFixed(0)}%</span></div>`;
+    // 재산 제한선 슬라이더
+    if(s.estateMode==='census'){
+      html+=`<div style="display:flex;align-items:center;gap:9px;font-size:11px;margin-bottom:6px">
+        <span style="min-width:64px;color:var(--tx3)">재산 요건</span>
+        <input type="range" id="sufSl" min="0" max="90" step="5" value="${Math.round(s.suffrageCut*100)}" style="flex:1;accent-color:var(--am);height:3px">
+        <span style="font-family:var(--mono);font-size:10px;color:var(--tx2)">하위 ${(s.suffrageCut*100).toFixed(0)}% 배제</span></div>`;
+    }
+    // 개혁 속도 선택
+    html+=`<div style="display:flex;align-items:center;gap:7px;margin:9px 0 4px 0;flex-wrap:wrap">
+      <span style="font-size:11px;color:var(--tx3);min-width:64px">개혁 속도</span>
+      ${Object.entries(ESTATE_PACE).map(([k,v])=>
+        `<button class="tchip ${(s.estatePace||'normal')===k?'on':'off'}" data-epace="${k}" title="${v.desc}">${v.label}</button>`).join('')}
+    </div>
+    <div class="cHint" style="margin:0 0 8px 0">${(ESTATE_PACE[s.estatePace||'normal']).desc}</div>`;
+    // 개혁 압력
+    const p=s.estatePressure||0;
+    const pc = p>0.6?'#ff6262': p>0.35?'#ffb24d':'var(--tx3)';
+    html+=`<div style="display:flex;align-items:center;gap:9px;font-size:11px">
+      <span style="min-width:64px;color:var(--tx3)">개혁 압력</span>
+      <div style="flex:1;height:9px;border-radius:5px;background:rgba(120,140,180,0.12);overflow:hidden">
+        <div style="width:${p*100}%;height:100%;background:${pc}"></div></div>
+      <span style="font-family:var(--mono);font-size:10px;color:${pc}">${(p*100).toFixed(0)}%</span></div>`;
+    html+=`<label class="cChk" style="font-size:10.5px;margin-top:9px"><input type="checkbox" id="estateLockTog" ${s.estateLock?'checked':''}>신분제 상태 고정 — 혁명·개혁으로 모드가 바뀌지 않는다</label>`;
     host.innerHTML=html;
   },
   renderCitizen(){
