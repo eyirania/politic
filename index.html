@@ -410,7 +410,25 @@ canvas.chart.tall{height:210px}
       <div style="display:flex;gap:6px;flex-wrap:wrap" id="introRegMode">
         <button class="cOpt on" data-rgm="default">기본 (아스텔)</button>
         <button class="cOpt" data-rgm="random">무작위 생성</button>
+        <button class="cOpt" data-rgm="terrain">지형 생성</button>
         <button class="cOpt" data-rgm="custom">직접 설정</button>
+      </div>
+      <div id="introTerrain" style="display:none;margin-top:11px">
+        <div style="display:flex;align-items:center;gap:9px;font-size:11px;color:#b8c4e0;margin-bottom:7px">
+          <span style="min-width:52px">지역 수</span>
+          <input type="range" id="tnCount" min="6" max="20" step="1" value="12" style="flex:1;accent-color:#54e0ff">
+          <span id="tnCountV" style="font-family:ui-monospace,monospace;font-size:11px;min-width:24px;text-align:right">12</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:9px;font-size:11px;color:#b8c4e0;margin-bottom:7px">
+          <span style="min-width:52px">육지 비율</span>
+          <input type="range" id="tnLand" min="40" max="82" step="2" value="60" style="flex:1;accent-color:#ffc14d">
+          <span id="tnLandV" style="font-family:ui-monospace,monospace;font-size:11px;min-width:32px;text-align:right">60%</span>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+          <button class="cOpt" id="tnReroll">🎲 다시 생성</button>
+          <span id="tnInfo" style="font-size:10px;color:#8fa3c8"></span>
+        </div>
+        <svg id="tnPreview" viewBox="0 0 460 330" style="width:100%;height:150px;background:rgba(12,20,42,0.6);border-radius:8px;border:1px solid rgba(130,170,255,0.18)"></svg>
       </div>
       <div id="introRegCustom" style="display:none;margin-top:10px;max-height:220px;overflow-y:auto"></div>
       <div id="introRegInfo" style="font-size:10.5px;color:#8fa3c8;margin-top:7px">기본 가상국가 아스텔의 인구·부 분포를 사용합니다.</div>
@@ -515,6 +533,7 @@ canvas.chart.tall{height:210px}
               <div class="muted" id="sysInfo" style="margin-top:4px;font-size:11px"></div>
               <div id="blocStrip" style="display:none;margin-top:10px"></div>
               <div id="allyStrip" style="display:none;margin-top:10px"></div>
+              <div id="facLegend" style="display:none;margin-top:8px;padding-top:7px;border-top:1px solid rgba(130,170,255,0.10)"></div>
               <div id="specView" style="display:none;margin-top:10px"></div>
               <div id="senWrap" style="display:none;margin-top:12px;border-top:1px solid rgba(130,170,255,0.12);padding-top:10px">
                 <div style="font-size:11px;color:var(--tx3);letter-spacing:1px;margin-bottom:4px" id="senHdr">상원</div>
@@ -999,7 +1018,8 @@ function lerp(a,b,t){ return a+(b-a)*t; }
 // ── 상수 ────────────────────────────────────────────────────────
 const N = 4200;            // 시민 수
 const K = 8;               // 1인당 네트워크 연결 수 (마지막 2개는 온라인)
-const NREG = 12;           // 지역 수
+let NREG = 12;             // 지역 수 (시작 시 설정 가능)
+let WORLD = null;          // 지형 기반 생성 결과 (없으면 기본 수제 지도)
 const REGION_NAMES=['수도권','북부 해안','동부 산악','서부 평야','남부 항만','중부 내륙',
                     '북동 광산','남서 농촌','동남 공업','서북 변경','중남 분지','도서 지방'];
 // 지역 고유치: popW(인구 가중) urban(도시화) wealth(부유도) industry(산업: tech/farm/mine/port/gov)
@@ -1018,8 +1038,28 @@ const REGION_TRAITS=[
   {popW:0.3, urban:0.35, wealth:0.7,  ind:'port', name:'도서·해양'},        // 도서 지방
 ];
 const INDUSTRY_LABEL={tech:'첨단제조',farm:'농업',mine:'광공업',port:'항만무역',gov:'행정금융'};
+const DEFAULT_REGION_NAMES = REGION_NAMES.slice();
 const REGION_TRAITS_DEFAULT = REGION_TRAITS.map(t=>({...t}));
 // 지역 구조 설정: 'default' | 'random' | 'custom'
+// 지형 기반으로 국토를 새로 만든다 (시뮬 생성 전에 호출)
+function applyGeneratedWorld(nreg, seed, landRatio){
+  const w = buildWorld(nreg, seed, landRatio);
+  WORLD = w;
+  NREG = nreg;
+  REGION_NAMES.length = 0;
+  w.names.forEach(n=>REGION_NAMES.push(n));
+  REGION_TRAITS.length = 0;
+  w.traits.forEach(t=>REGION_TRAITS.push({
+    popW:t.popW, wealth:t.wealth, urban:t.urban, ind:t.ind
+  }));
+  return w;
+}
+// 기본(수제 12지역)으로 되돌린다
+function resetWorldToDefault(){
+  WORLD = null; NREG = 12;
+  REGION_NAMES.length=0; DEFAULT_REGION_NAMES.forEach(n=>REGION_NAMES.push(n));
+  REGION_TRAITS.length=0; REGION_TRAITS_DEFAULT.forEach(t=>REGION_TRAITS.push({...t}));
+}
 function applyRegionSetup(mode, custom){
   if(mode==='default'){
     REGION_TRAITS_DEFAULT.forEach((t,i)=>Object.assign(REGION_TRAITS[i], t));
@@ -1127,6 +1167,620 @@ const REGIME = {
 };
 
 // ── 시뮬레이션 본체 ─────────────────────────────────────────────
+
+// ════════ 지형 기반 국토 생성 ════════
+// 고도 지도를 먼저 만들고, 자연 경계(해안·산맥·강)를 따라 지역을 나눈다.
+// 지역의 산업·도시화·부는 지형에서 도출되므로 인과가 생긴다.
+
+const TERRAIN = {
+  W: 92, H: 66,          // 격자 해상도
+  VIEW_W: 460, VIEW_H: 330,
+};
+
+// 값 노이즈 (시드 기반, 외부 의존 없음)
+function _tnHash(x, y, seed){
+  let h = x*374761393 + y*668265263 + seed*1274126177;
+  h = (h ^ (h >> 13)) * 1274126177;
+  return ((h ^ (h >> 16)) >>> 0) / 4294967295;
+}
+function _tnSmooth(x, y, seed){
+  const xi=Math.floor(x), yi=Math.floor(y);
+  const xf=x-xi, yf=y-yi;
+  const u=xf*xf*(3-2*xf), v=yf*yf*(3-2*yf);
+  const a=_tnHash(xi,yi,seed),   b=_tnHash(xi+1,yi,seed);
+  const c=_tnHash(xi,yi+1,seed), d=_tnHash(xi+1,yi+1,seed);
+  return (a*(1-u)+b*u)*(1-v) + (c*(1-u)+d*u)*v;
+}
+function _fbm(x, y, seed, oct){
+  let amp=1, freq=1, sum=0, norm=0;
+  for(let o=0;o<(oct||5);o++){
+    sum += _tnSmooth(x*freq, y*freq, seed+o*7919)*amp;
+    norm += amp; amp *= 0.5; freq *= 2;
+  }
+  return sum/norm;
+}
+
+// 고도·습도 지도를 만든다
+function generateTerrain(seed){
+  const {W,H} = TERRAIN;
+  const elev = new Float32Array(W*H);
+  const moist = new Float32Array(W*H);
+  // 대륙 마스크: 중앙이 높고 가장자리는 바다로 떨어진다
+  for(let y=0;y<H;y++){
+    for(let x=0;x<W;x++){
+      const nx=(x/W-0.5)*2, ny=(y/H-0.5)*2;
+      const d=Math.sqrt(nx*nx*0.85 + ny*ny*1.15);      // 가로로 약간 긴 대륙
+      const base=_fbm(x/13, y/13, seed, 5);
+      const ridge=Math.abs(_fbm(x/9+40, y/9+40, seed+555, 4)-0.5)*2;  // 산맥
+      let e = base*0.80 + (1-ridge)*0.20;
+      e -= Math.pow(Math.max(0, d-0.28), 1.7)*1.35;     // 가장자리 침강
+      elev[y*W+x] = e;
+      moist[y*W+x] = _fbm(x/16+200, y/16+200, seed+911, 4);
+    }
+  }
+  return {elev, moist, W, H};
+}
+
+// 해수면 결정: 육지 비율이 목표치에 맞도록 이분 탐색
+function findSeaLevel(elev, targetLand){
+  let lo=-1, hi=1;
+  for(let it=0; it<40; it++){
+    const mid=(lo+hi)/2;
+    let land=0;
+    for(let i=0;i<elev.length;i++) if(elev[i]>mid) land++;
+    const ratio=land/elev.length;
+    if(ratio > targetLand) lo=mid; else hi=mid;
+  }
+  return (lo+hi)/2;
+}
+
+// 강 생성: 높은 곳에서 시작해 최급경사를 따라 바다까지
+function traceRivers(T, sea, count){
+  const {elev,W,H}=T;
+  const river=new Uint8Array(W*H);
+  const cand=[];
+  for(let i=0;i<elev.length;i++) if(elev[i]>sea+0.22) cand.push(i);
+  if(!cand.length) return river;
+  for(let r=0;r<count;r++){
+    let cur=cand[(r*7919 + 13) % cand.length];
+    for(let step=0; step<W*2; step++){
+      river[cur]=1;
+      const x=cur%W, y=(cur/W)|0;
+      let best=-1, bestE=elev[cur];
+      for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){
+        if(!dx&&!dy) continue;
+        const nx=x+dx, ny=y+dy;
+        if(nx<0||ny<0||nx>=W||ny>=H) continue;
+        const ni=ny*W+nx;
+        if(elev[ni]<bestE){ bestE=elev[ni]; best=ni; }
+      }
+      if(best<0 || elev[best]<=sea) break;
+      cur=best;
+    }
+  }
+  return river;
+}
+
+// 육지 연결 요소(대륙·섬) 라벨링
+function labelLandmasses(T, sea){
+  const {elev,W,H}=T;
+  const lab=new Int16Array(W*H).fill(-1);
+  const sizes=[];
+  let cur=0;
+  for(let i=0;i<elev.length;i++){
+    if(elev[i]<=sea || lab[i]>=0) continue;
+    const q=[i]; lab[i]=cur; let n=0;
+    while(q.length){
+      const c=q.pop(); n++;
+      const x=c%W, y=(c/W)|0;
+      for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){
+        if(!dx&&!dy) continue;
+        const nx=x+dx, ny=y+dy;
+        if(nx<0||ny<0||nx>=W||ny>=H) continue;
+        const ni=ny*W+nx;
+        if(elev[ni]<=sea || lab[ni]>=0) continue;
+        lab[ni]=cur; q.push(ni);
+      }
+    }
+    sizes.push(n); cur++;
+  }
+  // 가장 큰 덩어리가 본토
+  let main=0; for(let k=1;k<sizes.length;k++) if(sizes[k]>sizes[main]) main=k;
+  return {lab, sizes, main, count:cur};
+}
+
+// 인접국 영토 할당: 본토의 가장자리 쪽 일부를 외국으로 떼어낸다
+// foreignN개의 외국이 대륙 변두리에 자리잡는다.
+function assignForeign(T, sea, LM, foreignN, seed){
+  const {elev,W,H}=T;
+  const own=new Int16Array(W*H).fill(-1);   // -1 국내, 0..n-1 외국
+  if(foreignN<=0) return {own, seeds:[]};
+  // 본토 가장자리 후보: 지도 경계에 가까운 육지
+  const edge=[];
+  for(let i=0;i<elev.length;i++){
+    if(elev[i]<=sea || LM.lab[i]!==LM.main) continue;
+    const x=i%W, y=(i/W)|0;
+    const dEdge=Math.min(x, y, W-1-x, H-1-y);
+    if(dEdge < Math.min(W,H)*0.22) edge.push(i);
+  }
+  if(edge.length<foreignN*30) return {own, seeds:[]};
+  // 외국 씨앗: 서로 멀리
+  const seeds=[];
+  seeds.push(edge[(_tnHash(1,1,seed)*edge.length)|0]);
+  while(seeds.length<foreignN){
+    let best=-1,bd=-1;
+    for(let k=0;k<edge.length;k+=2){
+      const i=edge[k], x=i%W, y=(i/W)|0;
+      let dmin=1e9;
+      for(const s of seeds){ const sx=s%W, sy=(s/W)|0;
+        const d=(x-sx)**2+(y-sy)**2; if(d<dmin)dmin=d; }
+      if(dmin>bd){ bd=dmin; best=i; }
+    }
+    if(best<0) break; seeds.push(best);
+  }
+  // 각 외국이 정해진 크기만큼 확장 (본토 육지의 일정 비율)
+  const mainCells=LM.sizes[LM.main];
+  const quota=Math.floor(mainCells*0.085);   // 외국 1개당 본토의 8.5%
+  seeds.forEach((s,k)=>{
+    const q=[s]; own[s]=k; let n=1;
+    while(q.length && n<quota){
+      const c=q.shift();
+      const x=c%W, y=(c/W)|0;
+      for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){
+        if(!dx&&!dy) continue;
+        const nx=x+dx, ny=y+dy;
+        if(nx<0||ny<0||nx>=W||ny>=H) continue;
+        const ni=ny*W+nx;
+        if(elev[ni]<=sea || own[ni]>=0 || LM.lab[ni]!==LM.main) continue;
+        // 산맥을 국경으로 삼는다: 고도가 높으면 확장을 꺼린다
+        if(_tnHash(nx,ny,seed+k*31) < Math.max(0,(elev[ni]-sea))*1.6) continue;
+        own[ni]=k; q.push(ni); n++;
+        if(n>=quota) break;
+      }
+    }
+  });
+  return {own, seeds};
+}
+
+// 지역 분할: 육지 셀에 씨앗을 뿌리고, 지형 비용을 반영해 번져나간다
+// (보로노이의 직선 경계 대신, 산맥·강을 넘기 어렵게 해 자연 경계를 만든다)
+function partitionRegions(T, sea, river, nreg, seed, foreignOwn, LM, islandMin){
+  const {elev,W,H}=T;
+  const owner=new Int16Array(W*H).fill(-1);
+  const isDomestic=i=> elev[i]>sea && (!foreignOwn || foreignOwn[i]<0);
+  // 큰 섬은 독립 지역으로 승격, 작은 섬은 본토 최근접 지역에 병합
+  const bigIslands=[];
+  if(LM && islandMin>0){
+    for(let k=0;k<LM.count;k++){
+      if(k===LM.main) continue;
+      if(LM.sizes[k]>=islandMin) bigIslands.push(k);
+    }
+  }
+  const nIsland=Math.min(bigIslands.length, Math.max(0, nreg-2));
+  const nMain=nreg-nIsland;
+  // 외국 영토가 국내 육지를 조각낼 수 있다 → 최대 연결 조각만 본토로 쓴다
+  const dcomp=new Int16Array(W*H).fill(-1);
+  const dsz=[];
+  {
+    let c=0;
+    for(let i=0;i<elev.length;i++){
+      if(!isDomestic(i) || (LM&&LM.lab[i]!==LM.main) || dcomp[i]>=0) continue;
+      const q=[i]; dcomp[i]=c; let n=0;
+      while(q.length){ const cu=q.pop(); n++;
+        const x=cu%W, y=(cu/W)|0;
+        for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){
+          const nx=x+dx, ny=y+dy;
+          if(nx<0||ny<0||nx>=W||ny>=H) continue;
+          const ni=ny*W+nx;
+          if(!isDomestic(ni) || (LM&&LM.lab[ni]!==LM.main) || dcomp[ni]>=0) continue;
+          dcomp[ni]=c; q.push(ni);
+        } }
+      dsz.push(n); c++;
+    }
+  }
+  let mainComp=0; for(let k=1;k<dsz.length;k++) if(dsz[k]>dsz[mainComp]) mainComp=k;
+  const inMain=i=> dcomp[i]===mainComp;
+  const land=[];
+  for(let i=0;i<elev.length;i++) if(inMain(i)) land.push(i);
+  if(land.length<nMain*4) return {owner, seeds:[]};
+
+  // 씨앗: 서로 충분히 떨어지도록 최원거리 우선 배치
+  const seeds=[];
+  seeds.push(land[(land.length/2)|0]);
+  // 지역 하나가 가질 평균 면적에서 최소 반경을 유도한다
+  const minR2 = Math.max(4, (land.length/Math.max(1,nMain))/Math.PI) * 0.55;
+  while(seeds.length<nMain){
+    let best=-1, bestD=-1;
+    for(let k=0;k<land.length;k+=3){
+      const i=land[k];
+      if(!inMain(i)) continue;                   // 본토 최대 조각에만 씨앗
+      const x=i%W, y=(i/W)|0;
+      let dmin=1e9;
+      for(const s of seeds){
+        const sx=s%W, sy=(s/W)|0;
+        const d=(x-sx)**2+(y-sy)**2;
+        if(d<dmin) dmin=d;
+      }
+      if(dmin<minR2) continue;                   // 너무 가까우면 후보 제외
+      const jitter = _tnHash(x,y,seed+seeds.length)*6;
+      if(dmin+jitter>bestD){ bestD=dmin+jitter; best=i; }
+    }
+    if(best<0){
+      // 최소 거리를 만족하는 후보가 없으면 조건을 완화해 한 번 더
+      let b2=-1, d2=-1;
+      for(let k=0;k<land.length;k+=2){
+        const i=land[k]; if(!inMain(i)) continue;
+        const x=i%W, y=(i/W)|0;
+        let dmin=1e9;
+        for(const s2 of seeds){ const sx=s2%W, sy=(s2/W)|0;
+          const d=(x-sx)**2+(y-sy)**2; if(d<dmin)dmin=d; }
+        if(dmin>d2){ d2=dmin; b2=i; }
+      }
+      if(b2<0) break;
+      seeds.push(b2); continue;
+    }
+    seeds.push(best);
+  }
+
+  // 지형 비용 기반 확장 (다익스트라 유사)
+  // 진짜 다익스트라: 전역 최소 비용 셀부터 확장해야 씨앗이 고르게 자란다
+  const dist=new Float32Array(W*H).fill(Infinity);
+  const heap=[];                      // [cost, cellIndex]
+  const hPush=(c,i2)=>{ heap.push([c,i2]); let k=heap.length-1;
+    while(k>0){ const par=(k-1)>>1; if(heap[par][0]<=heap[k][0])break;
+      [heap[par],heap[k]]=[heap[k],heap[par]]; k=par; } };
+  const hPop=()=>{ const top=heap[0], last=heap.pop();
+    if(heap.length){ heap[0]=last; let k=0;
+      for(;;){ const l=2*k+1, r=l+1; let m=k;
+        if(l<heap.length&&heap[l][0]<heap[m][0])m=l;
+        if(r<heap.length&&heap[r][0]<heap[m][0])m=r;
+        if(m===k)break; [heap[m],heap[k]]=[heap[k],heap[m]]; k=m; } }
+    return top; };
+  seeds.forEach((s2,k)=>{ owner[s2]=k; dist[s2]=0; hPush(0,s2); });
+  while(heap.length){
+    const [c,cur]=hPop();
+    if(c>dist[cur]) continue;
+    const x=cur%W, y=(cur/W)|0;
+    for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){
+      if(!dx&&!dy) continue;
+      const nx=x+dx, ny=y+dy;
+      if(nx<0||ny<0||nx>=W||ny>=H) continue;
+      const ni=ny*W+nx;
+      if(!inMain(ni)) continue;
+      const slope=Math.abs(elev[ni]-elev[cur])*9;
+      const cross=river[ni]?0.9:0;
+      const rough=Math.max(0, elev[ni]-sea)*0.6;
+      const cost=1 + slope + cross + rough + _tnHash(nx,ny,seed+77)*0.35;
+      const nd=c+cost;
+      if(nd<dist[ni]){ dist[ni]=nd; owner[ni]=owner[cur]; hPush(nd,ni); }
+    }
+  }
+  // 본토에서 떨어져 나간 국내 잔여 조각 → 최근접 지역에 병합
+  for(let k=0;k<dsz.length;k++){
+    if(k===mainComp) continue;
+    let cx=0,cy=0,n=0;
+    for(let i=0;i<elev.length;i++) if(dcomp[i]===k){ cx+=i%W; cy+=(i/W)|0; n++; }
+    if(!n) continue; cx/=n; cy/=n;
+    let best=-1,bd=1e18;
+    for(let i=0;i<elev.length;i++){
+      if(owner[i]<0) continue;
+      const d=(i%W-cx)**2+(((i/W)|0)-cy)**2;
+      if(d<bd){bd=d;best=owner[i];}
+    }
+    if(best>=0) for(let i=0;i<elev.length;i++) if(dcomp[i]===k) owner[i]=best;
+  }
+  // ── 극소 지역 흡수: 셀이 너무 적으면 가장 인접한 지역에 합친다 ──
+  {
+    const MIN=Math.max(12, Math.floor(land.length/(nMain*6)));
+    for(let pass=0; pass<3; pass++){
+      const cnt=new Int32Array(nMain);
+      for(let i=0;i<owner.length;i++){ const k=owner[i]; if(k>=0&&k<nMain) cnt[k]++; }
+      let changed=false;
+      for(let k=0;k<nMain;k++){
+        if(cnt[k]===0 || cnt[k]>=MIN) continue;
+        // 인접 지역 중 가장 접촉면이 넓은 곳으로
+        const touch=new Int32Array(nMain);
+        for(let i=0;i<owner.length;i++){
+          if(owner[i]!==k) continue;
+          const x=i%W, y=(i/W)|0;
+          for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){
+            const nx=x+dx, ny=y+dy;
+            if(nx<0||ny<0||nx>=W||ny>=H) continue;
+            const o=owner[ny*W+nx];
+            if(o>=0&&o<nMain&&o!==k) touch[o]++;
+          }
+        }
+        let tgt=-1,tb=0;
+        for(let q=0;q<nMain;q++) if(touch[q]>tb){tb=touch[q];tgt=q;}
+        if(tgt<0) continue;
+        for(let i=0;i<owner.length;i++) if(owner[i]===k) owner[i]=tgt;
+        changed=true;
+      }
+      if(!changed) break;
+    }
+    // 빈 ID를 큰 지역에서 떼어내 다시 채운다 (지역 수 유지)
+    for(let k=0;k<nMain;k++){
+      const cnt=new Int32Array(nMain);
+      for(let i=0;i<owner.length;i++){ const o=owner[i]; if(o>=0&&o<nMain) cnt[o]++; }
+      if(cnt[k]>0) continue;
+      let big=0; for(let q=1;q<nMain;q++) if(cnt[q]>cnt[big]) big=q;
+      if(cnt[big]<MIN*2) break;
+      // big의 절반을 잘라 k에 준다 (중심에서 먼 쪽)
+      const cells=[]; for(let i=0;i<owner.length;i++) if(owner[i]===big) cells.push(i);
+      let cx=0,cy=0; cells.forEach(i=>{cx+=i%W; cy+=(i/W)|0;}); cx/=cells.length; cy/=cells.length;
+      cells.sort((a,b)=>{
+        const da=(a%W-cx)**2+(((a/W)|0)-cy)**2, db=(b%W-cx)**2+(((b/W)|0)-cy)**2;
+        return db-da; });
+      const take=Math.floor(cells.length*0.42);
+      for(let q=0;q<take;q++) owner[cells[q]]=k;
+    }
+  }
+  // ── 섬 처리 ──
+  if(LM){
+    // 큰 섬: 독립 지역으로 승격
+    let nextId=nMain;
+    for(let bi=0; bi<nIsland; bi++){
+      const k=bigIslands[bi];
+      for(let i=0;i<elev.length;i++)
+        if(LM.lab[i]===k && isDomestic(i)) owner[i]=nextId;
+      nextId++;
+    }
+    // 작은 섬: 본토 최근접 지역에 병합
+    for(let k=0;k<LM.count;k++){
+      if(k===LM.main || bigIslands.slice(0,nIsland).includes(k)) continue;
+      // 섬 중심
+      let cx=0, cy=0, n=0;
+      for(let i=0;i<elev.length;i++) if(LM.lab[i]===k && isDomestic(i)){ cx+=i%W; cy+=(i/W)|0; n++; }
+      if(!n) continue;
+      cx/=n; cy/=n;
+      // 가장 가까운 본토 지역
+      let best=-1, bd=1e18;
+      for(let i=0;i<elev.length;i++){
+        if(owner[i]<0 || owner[i]>=nMain) continue;
+        const d=(i%W-cx)**2 + (((i/W)|0)-cy)**2;
+        if(d<bd){ bd=d; best=owner[i]; }
+      }
+      if(best>=0) for(let i=0;i<elev.length;i++) if(LM.lab[i]===k && isDomestic(i)) owner[i]=best;
+    }
+  }
+  return {owner, seeds, nMain, nIsland};
+}
+
+// 지역별 지형 통계 → 특성 도출
+function deriveRegionTraits(T, sea, river, owner, seeds, nreg){
+  const {elev,moist,W,H}=T;
+  const st=[];
+  for(let k=0;k<nreg;k++) st.push({n:0, elevSum:0, moistSum:0, coast:0, riverN:0,
+    cx:0, cy:0, minX:1e9, maxX:-1e9, minY:1e9, maxY:-1e9});
+  for(let i=0;i<owner.length;i++){
+    const k=owner[i]; if(k<0||k>=nreg) continue;
+    const x=i%W, y=(i/W)|0;
+    const s=st[k];
+    s.n++; s.elevSum+=elev[i]-sea; s.moistSum+=moist[i];
+    s.cx+=x; s.cy+=y;
+    if(x<s.minX)s.minX=x; if(x>s.maxX)s.maxX=x;
+    if(y<s.minY)s.minY=y; if(y>s.maxY)s.maxY=y;
+    if(river[i]) s.riverN++;
+    // 해안: 8이웃 중 바다가 있으면
+    let isCoast=false;
+    for(let dy=-1;dy<=1&&!isCoast;dy++) for(let dx=-1;dx<=1;dx++){
+      const nx=x+dx, ny=y+dy;
+      if(nx<0||ny<0||nx>=W||ny>=H){ isCoast=true; break; }
+      if(elev[ny*W+nx]<=sea){ isCoast=true; break; }
+    }
+    if(isCoast) s.coast++;
+  }
+  const out=[];
+  const totalN=st.reduce((a,s)=>a+s.n,0)||1;
+  // 고도·해안·습도 임계를 분위수로 잡는다 (지형이 달라도 산업이 균형 있게 나뉘도록)
+  const evs=st.filter(s=>s.n).map(s=>s.elevSum/s.n).sort((a,b)=>a-b);
+  const cvs=st.filter(s=>s.n).map(s=>s.coast/s.n).sort((a,b)=>b-a);
+  const mvs=st.filter(s=>s.n).map(s=>s.moistSum/s.n).sort((a,b)=>b-a);
+  const q=(arr,f)=>arr.length? arr[Math.min(arr.length-1, Math.floor(arr.length*f))] : 0;
+  const ELEV_HI = q(evs, 0.70);      // 상위 30%가 산악
+  const COAST_HI= q(cvs, 0.35);      // 해안 접촉 상위 35%가 항만
+  const MOIST_HI= q(mvs, 0.45);      // 습윤 상위 45% 중 저지대가 농업
+  // 수도: 강이 있고 고도가 낮으며 중앙에 가까운 지역
+  let capital=0, capScore=-1e9;
+  st.forEach((s,k)=>{
+    if(!s.n) return;
+    const cx=s.cx/s.n, cy=s.cy/s.n;
+    const centrality = 1 - Math.sqrt(((cx/W-0.5)*2)**2 + ((cy/H-0.5)*2)**2);
+    const flat = 1 - Math.min(1, (s.elevSum/s.n)*2.2);
+    const sc = centrality*1.4 + flat*0.8 + (s.riverN/s.n)*2.4;
+    if(sc>capScore){ capScore=sc; capital=k; }
+  });
+  st.forEach((s,k)=>{
+    const n=Math.max(1,s.n);
+    const elevAvg=s.elevSum/n;               // 평균 고도(해수면 기준)
+    const coastRatio=s.coast/n;
+    const riverRatio=s.riverN/n;
+    const moistAvg=s.moistSum/n;
+    const cx=s.cx/n, cy=s.cy/n;
+    // 산업: 지형에서 도출
+    let ind;
+    if(k===capital) ind='gov';
+    else if(coastRatio>=COAST_HI && coastRatio>0.10) ind='port';
+    else if(elevAvg>=ELEV_HI) ind='mine';
+    else if(moistAvg>=MOIST_HI) ind='farm';
+    else ind='tech';
+    // 도시화: 낮고 강이 있고 수도에 가까울수록 높다
+    const distCap = Math.sqrt((cx-st[capital].cx/Math.max(1,st[capital].n))**2
+                            + (cy-st[capital].cy/Math.max(1,st[capital].n))**2)/W;
+    let urban = 0.34 + riverRatio*0.9 + coastRatio*0.30 - elevAvg*1.5 - distCap*0.55;
+    if(k===capital) urban=Math.max(urban, 0.90);
+    urban=Math.max(0.14, Math.min(0.97, urban));
+    // 인구: 도시화·면적·평지 비율
+    let popW = (s.n/totalN)*nreg * (0.55 + urban*0.95);
+    if(k===capital) popW*=1.9;
+    // 부: 도시화·산업
+    const indW={gov:1.30, tech:1.16, port:1.06, farm:0.80, mine:0.86}[ind];
+    let wealth = (0.62 + urban*0.72) * indW;
+    out.push({
+      popW:+popW.toFixed(2), wealth:+wealth.toFixed(2), urban:+urban.toFixed(2), ind,
+      _cx:cx, _cy:cy, _elev:elevAvg, _coast:coastRatio, _river:riverRatio,
+      _capital:(k===capital), _cells:s.n,
+      _bbox:[s.minX,s.minY,s.maxX,s.maxY],
+    });
+  });
+  return {traits:out, capital};
+}
+
+// 지형에 어울리는 지역명 생성
+function nameRegions(traits, W, H){
+  const used=new Set();
+  const dirOf=(cx,cy)=>{
+    const nx=cx/W-0.5, ny=cy/H-0.5;
+    const ang=Math.atan2(ny,nx);
+    const r=Math.sqrt(nx*nx+ny*ny);
+    if(r<0.17) return '중부';
+    const oct=Math.round(ang/(Math.PI/4));
+    return ['동부','남동','남부','남서','서부','북서','북부','북동','동부'][(oct+4)] || '중부';
+  };
+  const kindOf=t=>{
+    if(t._capital) return null;
+    if(t.ind==='port') return t._coast>0.30?'항만':'해안';
+    if(t.ind==='mine') return '산악';
+    if(t._coast>0.28) return '해안';
+    if(t.ind==='port') return '항만';
+    if(t.ind==='farm') return '평야';
+    if(t.ind==='mine') return '광산';
+    if(t._river>0.10) return '강안';
+    return '내륙';
+  };
+  return traits.map(t=>{
+    if(t._capital){ used.add('수도권'); return '수도권'; }
+    const d=dirOf(t._cx,t._cy), k=kindOf(t);
+    let nm=d+' '+k;
+    if(used.has(nm)){
+      for(const alt of ['평야','고원','분지','구릉','변경','만(灣)']){
+        const c=d+' '+alt; if(!used.has(c)){ nm=c; break; }
+      }
+    }
+    let guard=2;
+    while(used.has(nm) && guard<9){ nm=d+' 제'+guard+'권'; guard++; }
+    used.add(nm);
+    return nm;
+  });
+}
+
+// 격자 소유권 → SVG 폴리곤 경계 추출 (마칭 스퀘어 방식의 단순화)
+function extractBorders(owner, nreg, W, H){
+  const sx=TERRAIN.VIEW_W/W, sy=TERRAIN.VIEW_H/H;
+  const paths=[];
+  for(let k=0;k<nreg;k++){
+    // 각 셀의 외곽 변을 모아 경로 조각으로
+    const segs=new Map();   // "x1,y1|x2,y2"
+    const addSeg=(x1,y1,x2,y2)=>{
+      const key=`${x1},${y1}|${x2},${y2}`;
+      segs.set(key,[x1,y1,x2,y2]);
+    };
+    for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+      if(owner[y*W+x]!==k) continue;
+      const up    = y>0   ? owner[(y-1)*W+x] : -2;
+      const down  = y<H-1 ? owner[(y+1)*W+x] : -2;
+      const left  = x>0   ? owner[y*W+(x-1)] : -2;
+      const right = x<W-1 ? owner[y*W+(x+1)] : -2;
+      if(up!==k)    addSeg(x, y, x+1, y);
+      if(down!==k)  addSeg(x, y+1, x+1, y+1);
+      if(left!==k)  addSeg(x, y, x, y+1);
+      if(right!==k) addSeg(x+1, y, x+1, y+1);
+    }
+    // 조각들을 이어 폐곡선 만들기
+    const adj=new Map();
+    for(const [,[x1,y1,x2,y2]] of segs){
+      const a=`${x1},${y1}`, b=`${x2},${y2}`;
+      if(!adj.has(a)) adj.set(a,[]); adj.get(a).push(b);
+      if(!adj.has(b)) adj.set(b,[]); adj.get(b).push(a);
+    }
+    const loops=[];
+    const visited=new Set();
+    for(const start of adj.keys()){
+      if(visited.has(start)) continue;
+      const loop=[]; let cur=start, prev=null;
+      for(let step=0; step<W*H*4; step++){
+        visited.add(cur); loop.push(cur);
+        const nbs=(adj.get(cur)||[]).filter(n=>n!==prev && !visited.has(n));
+        if(!nbs.length){
+          const back=(adj.get(cur)||[]).filter(n=>n===start);
+          break;
+        }
+        prev=cur; cur=nbs[0];
+      }
+      if(loop.length>=4) loops.push(loop);
+    }
+    if(!loops.length){ paths.push(''); continue; }
+    loops.sort((a,b)=>b.length-a.length);
+    const pts=loops[0].map(s=>{
+      const [gx,gy]=s.split(',').map(Number);
+      return [ +(gx*sx).toFixed(1), +(gy*sy).toFixed(1) ];
+    });
+    // 경로 단순화 (인접 중복 제거)
+    const simp=[];
+    for(const p of pts){
+      const last=simp[simp.length-1];
+      if(!last || Math.abs(last[0]-p[0])>0.6 || Math.abs(last[1]-p[1])>0.6) simp.push(p);
+    }
+    paths.push(simp.map((p,i)=>(i?'L':'M')+p[0]+' '+p[1]).join(' ')+' Z');
+  }
+  return paths;
+}
+
+// 해안선(바다 영역) 경로
+function seaPath(T, sea){
+  const {elev,W,H}=T;
+  const sx=TERRAIN.VIEW_W/W, sy=TERRAIN.VIEW_H/H;
+  let d='';
+  for(let y=0;y<H;y++){
+    let run=-1;
+    for(let x=0;x<=W;x++){
+      const isSea = x<W && elev[y*W+x]<=sea;
+      if(isSea && run<0) run=x;
+      if(!isSea && run>=0){
+        d += `M${(run*sx).toFixed(1)} ${(y*sy).toFixed(1)}h${((x-run)*sx).toFixed(1)}v${sy.toFixed(1)}h-${((x-run)*sx).toFixed(1)}Z`;
+        run=-1;
+      }
+    }
+  }
+  return d;
+}
+
+// 전체 생성 파이프라인
+function buildWorld(nreg, seed, landRatio, opts){
+  const O = opts||{};
+  const foreignN = (O.foreignN!=null)? O.foreignN : 3;
+  const T=generateTerrain(seed);
+  const sea=findSeaLevel(T.elev, landRatio||0.62);
+  const river=traceRivers(T, sea, Math.max(3, Math.round(nreg*0.7)));
+  const LM=labelLandmasses(T, sea);
+  const FA=assignForeign(T, sea, LM, foreignN, seed);
+  // 섬 승격 기준: 본토의 3.5% 이상이면 독립 지역
+  const islandMin=Math.max(24, Math.floor(LM.sizes[LM.main]*0.035));
+  const {owner, seeds, nMain, nIsland}=partitionRegions(T, sea, river, nreg, seed, FA.own, LM, islandMin);
+  const {traits, capital}=deriveRegionTraits(T, sea, river, owner, seeds, nreg);
+  const names=nameRegions(traits, T.W, T.H);
+  const paths=extractBorders(owner, nreg, T.W, T.H);
+  const seaD=seaPath(T, sea);
+  // 외국 영토 경로
+  const foreignPaths=[];
+  if(foreignN>0){
+    const fo=new Int16Array(FA.own.length);
+    for(let i=0;i<FA.own.length;i++) fo[i]=FA.own[i];
+    const fp=extractBorders(fo, foreignN, T.W, T.H);
+    for(const d of fp) foreignPaths.push(d);
+  }
+  // 강 경로 (표시용)
+  const sx=TERRAIN.VIEW_W/T.W, sy=TERRAIN.VIEW_H/T.H;
+  let riverD='';
+  for(let i=0;i<river.length;i++){
+    if(!river[i] || T.elev[i]<=sea) continue;
+    const x=(i%T.W)*sx, y=((i/T.W)|0)*sy;
+    riverD += `M${x.toFixed(1)} ${y.toFixed(1)}h${(sx*1.1).toFixed(1)}`;
+  }
+  return { nreg, seed, sea, traits, names, paths, seaD, riverD, capital, T, owner,
+           foreignPaths, foreignOwn:FA.own, foreignN, nMain, nIsland,
+           islands:(nIsland||0) };
+}
 class Sim {
   constructor(){
     this.tick = 0;                 // 1 tick = 1개월
@@ -1874,15 +2528,25 @@ class Sim {
     }
     return L;
   }
-  _factionName(type, ord){
+  _factionName(type, ord, used){
     void ord;
-    const lead=['친(親)주류','비(非)주류','신(新)','구(舊)','강경','개혁','중도','정통'];
-    const ideo={est:'주류파',rad:'강경파',ref:'개혁파',mod:'온건파',left:'좌파',right:'우파',pers:'계'};
-    if(type==='est') return '주류 '+pick(['본류','핵심','중진그룹']);
-    if(type==='rad') return pick(['강경','선명','원칙'])+'파';
-    if(type==='ref') return pick(['개혁','쇄신','소장'])+'파';
-    if(type==='pers') return pick(['친정부','반주류','신주류','소장'])+'계';
-    return pick(lead)+'계';
+    const U = used instanceof Set ? used : new Set();
+    const BANK = {
+      est : ['주류 본류','주류 핵심','중진그룹','당권파','주류계'],
+      rad : ['강경파','선명파','원칙파','투쟁파','정통파'],
+      ref : ['개혁파','쇄신파','소장파','혁신파','신진그룹'],
+      pers: ['친정부계','반주류계','신주류계','소장계','비주류계'],
+      mod : ['온건파','중도파','실용파','조정파'],
+    };
+    const list = BANK[type] || BANK.mod;
+    // 아직 쓰이지 않은 이름을 우선 고른다
+    const free = list.filter(n=>!U.has(n));
+    if(free.length) return free[(rnd()*free.length)|0];
+    // 전부 소진되면 계열 표기로 구분
+    const base = list[(rnd()*list.length)|0];
+    for(let k=2;k<12;k++){ const cand=base+' '+['','제2','제3','제4','제5','제6'][k-1]; 
+      if(cand && !U.has(cand)) return cand; }
+    return base+' '+((rnd()*90|0)+10);
   }
   // 한 정당의 계파 갱신
   _updatePartyFactions(p){
@@ -1964,7 +2628,8 @@ class Sim {
       else f.type='pers';
       f.dom=(f===dom);
       // 새 계파만 이름·색 부여 (계승된 건 유지)
-      if(!f.name){ f.name=this._factionName(f.type, f.fid); f.color=FAC_COLORS[f.fid%FAC_COLORS.length]; }
+      if(!f.name){ const used=new Set((p.factions||[]).map(x=>x.name).filter(Boolean));
+        f.name=this._factionName(f.type, f.fid, used); f.color=FAC_COLORS[f.fid%FAC_COLORS.length]; }
       // 리더: 이전 계파에서 계승, 없으면 신규 추대
       if(!f.leader){
         const prevF=prev.find(pf=>pf.fid===f.fid && pf.leader);
@@ -4299,7 +4964,8 @@ class Sim {
             : ((1-oppShare)>0? mainSeats*(f.share/(1-oppShare)) : 0);
           const fv = isOpp ? (v==='yes'?'no':v==='no'?'yes':'no') : v;
           facRows.push({ fid:f.fid, name:f.name, type:f.type, color:f.color,
-            leader: f.leader? f.leader.name : '', vote:fv,
+            leader: f.leader? f.leader.name : '', vote:fv, lr: this.lr(f.cent),
+            pid: p.id, pname: p.name, pcolor: p.color,
             seats: Math.max(0, Math.round(seatShare)), defected:isOpp });
         }
       }
@@ -4908,7 +5574,7 @@ class Sim {
   }
 
   static get PRESETS(){ return {
-    korea:   {label:'🇰🇷 한국형', form:'PRES',     con:{method:'PARALLEL',lowerSeats:300,districtRatio:0.84,threshold:3,term:4,senate:'NONE',presRunoff:false},
+    korea:   {label:'🇰🇷 한국형', form:'PRES',     regions:17, con:{method:'PARALLEL',lowerSeats:300,districtRatio:0.84,threshold:3,term:4,senate:'NONE',presRunoff:false},
               desc:'대통령제 · 병립형(지역구 253+비례 47) · 단원제',
               seed:[ // 거대 양당 + 소수 진보정당, 지역주의 반영
                 {name:'국민의힘',   share:0.40, color:'#e61e2b', cent:[-0.30, 0.10, 0.35,  0.15, -0.05,  0.05], rad:0.15},
@@ -4916,14 +5582,14 @@ class Sim {
                 {name:'정의당',     share:0.12, color:'#ffd400', cent:[ 0.10, 0.00,-0.05,  0.05,  0.45, -0.05], rad:0.30},
                 {name:'자유통일당', share:0.10, color:'#00256e', cent:[ 0.00, 0.35, 0.15,  0.55,  0.00,  0.00], rad:0.35},
               ], regionalismSeed:0.55},
-    usa:     {label:'🇺🇸 미국형', form:'PRES',     con:{method:'FPTP',lowerSeats:435,term:2,renewHalf:false,senate:'FEDERAL',senSeats:100,senTerm:6,senRenew:true,senPower:1.0,majority:0.5,presRunoff:false},
+    usa:     {label:'🇺🇸 미국형', form:'PRES',     regions:14, con:{method:'FPTP',lowerSeats:435,term:2,renewHalf:false,senate:'FEDERAL',senSeats:100,senTerm:6,senRenew:true,senPower:1.0,majority:0.5,presRunoff:false},
               desc:'대통령제 · 소선거구 · 연방 상원(주별 2석, 1/3씩 개선, 대칭형)',
               seed:[ // 강한 양당제, 이념거리 큼
                 {name:'공화당',     share:0.47, color:'#d02020', cent:[-0.45, 0.15, 0.40,  0.20, -0.10, -0.05], rad:0.20},
                 {name:'민주당',     share:0.47, color:'#2255cc', cent:[ 0.40,-0.10,-0.30, -0.10,  0.25,  0.10], rad:0.20},
                 {name:'자유당',     share:0.06, color:'#fed105', cent:[ 0.05, 0.30, 0.10,  0.50,  0.05, -0.10], rad:0.45},
               ], allyMaxLRSeed:0.5},
-    japan:   {label:'🇯🇵 일본형', form:'CONSTMON', con:{method:'PARALLEL',lowerSeats:465,districtRatio:0.62,threshold:2,term:4,senate:'POPULAR',senSeats:248,senTerm:6,senRenew:true,senPower:0.6},
+    japan:   {label:'🇯🇵 일본형', form:'CONSTMON', regions:10, con:{method:'PARALLEL',lowerSeats:465,districtRatio:0.62,threshold:2,term:4,senate:'POPULAR',senSeats:248,senTerm:6,senRenew:true,senPower:0.6},
               desc:'입헌군주(천황) · 병립형 중의원 · 직선 참의원(절반 개선)',
               seed:[ // 지배정당 + 파편화된 야당들
                 {name:'자유민주당', share:0.42, color:'#dc143c', cent:[-0.20, 0.05, 0.40,  0.10, -0.15,  0.15], rad:0.10},
@@ -4933,7 +5599,7 @@ class Sim {
                 {name:'일본유신회', share:0.08, color:'#00a1e9', cent:[ 0.30, 0.00,-0.15, -0.05,  0.10,  0.15], rad:0.10},
                 {name:'일본공산당', share:0.06, color:'#8b0000', cent:[-0.05, 0.05,-0.10,  0.05,  0.55, -0.10], rad:0.30},
               ]},
-    germany: {label:'🇩🇪 독일형', form:'PARL',     con:{method:'MMP',lowerSeats:598,districtRatio:0.5,threshold:5,term:4,senate:'FEDERAL',senSeats:69,senPower:0.5},
+    germany: {label:'🇩🇪 독일형', form:'PARL',     regions:16, con:{method:'MMP',lowerSeats:598,districtRatio:0.5,threshold:5,term:4,senate:'FEDERAL',senSeats:69,senPower:0.5},
               desc:'내각제 · 연동형 비례(봉쇄 5%) · 연방 상원(주정부 대표)',
               seed:[ // 중도우파·중도좌파 양대 + 녹색·자유·좌파·극우
                 {name:'기독교민주연합', share:0.27, color:'#000000', cent:[-0.15, 0.05, 0.35,  0.05, -0.10,  0.10], rad:0.12},
@@ -4943,7 +5609,7 @@ class Sim {
                 {name:'좌파당',        share:0.11, color:'#be3075', cent:[-0.05, 0.10,-0.10,  0.05,  0.55, -0.15], rad:0.30},
                 {name:'독일을 위한 대안',share:0.12, color:'#009ee0', cent:[-0.10, 0.45, 0.20,  0.65, -0.05, -0.20], rad:0.40},
               ], activistPullSeed:0.35},
-    italy:   {label:'🇮🇹 이탈리아형', form:'PARL', con:{method:'PARALLEL',lowerSeats:400,districtRatio:0.37,threshold:3,term:5,senate:'POPULAR',senSeats:200,senTerm:5,senPower:1.0},
+    italy:   {label:'🇮🇹 이탈리아형', form:'PARL', regions:20, con:{method:'PARALLEL',lowerSeats:400,districtRatio:0.37,threshold:3,term:5,senate:'POPULAR',senSeats:200,senTerm:5,senPower:1.0},
               desc:'내각제 · 혼합형 · 대칭 양원제(상하원 동권)',
               seed:[ // 다당 파편화, 결속 약함
                 {name:'이탈리아형제들', share:0.20, color:'#0f4d92', cent:[-0.10, 0.15, 0.30,  0.30, -0.05,  0.00], rad:0.20},
@@ -4954,7 +5620,7 @@ class Sim {
                 {name:'악치오네',       share:0.12, color:'#f28c00', cent:[-0.20, 0.05, 0.15,  0.10, -0.20,  0.15], rad:0.15},
                 {name:'이탈리아좌파',   share:0.10, color:'#d62020', cent:[ 0.10, 0.05,-0.05,  0.05,  0.45, -0.10], rad:0.25},
               ], allyMaxLRSeed:0.85},
-    france:  {label:'🇫🇷 프랑스형', form:'SEMI',   con:{method:'RUNOFF',lowerSeats:577,term:5,senate:'APPOINTED',senSeats:348,senTerm:6,senRenew:true,senPower:0.4,presRunoff:true},
+    france:  {label:'🇫🇷 프랑스형', form:'SEMI',   regions:13, con:{method:'RUNOFF',lowerSeats:577,term:5,senate:'APPOINTED',senSeats:348,senTerm:6,senRenew:true,senPower:0.4,presRunoff:true},
               desc:'이원집정부제 · 결선투표 · 간선 상원 — 동거정부 가능',
               seed:[ // 중도 집권 + 극우·극좌 강세 + 전통 우파
                 {name:'르네상스',       share:0.28, color:'#ffd700', cent:[ 0.20,-0.05,-0.10,  0.00,  0.05,  0.10], rad:0.10},
@@ -4963,7 +5629,7 @@ class Sim {
                 {name:'공화당',         share:0.17, color:'#0066cc', cent:[-0.35, 0.05, 0.40,  0.10, -0.15,  0.05], rad:0.15},
                 {name:'녹색당',         share:0.15, color:'#00c000', cent:[ 0.30,-0.05,-0.15, -0.05, -0.10,  0.10], rad:0.12},
               ]},
-    denmark: {label:'🇩🇰 덴마크형', form:'CONSTMON',con:{method:'PR',lowerSeats:179,threshold:2,term:4,senate:'NONE'},
+    denmark: {label:'🇩🇰 덴마크형', form:'CONSTMON',regions:6, con:{method:'PR',lowerSeats:179,threshold:2,term:4,senate:'NONE'},
               desc:'입헌군주 · 순수 비례대표 · 단원제 — 상시 연정',
               seed:[ // 다당이나 이념거리는 좁음(합의제 문화)
                 {name:'사회민주당',   share:0.24, color:'#e60012', cent:[ 0.05,-0.05,-0.05,  0.00,  0.30,  0.15], rad:0.08},
@@ -4973,7 +5639,7 @@ class Sim {
                 {name:'덴마크국민당', share:0.12, color:'#f0d500', cent:[-0.05, 0.15, 0.10,  0.20,  0.10,  0.05], rad:0.12},
                 {name:'적녹연합',     share:0.12, color:'#c6272d', cent:[ 0.10, 0.00,-0.05,  0.00,  0.45,  0.05], rad:0.15},
               ], activistPullSeed:0.2, allyMaxLRSeed:0.45},
-    uk:      {label:'🇬🇧 영국형', form:'CONSTMON', con:{method:'FPTP',lowerSeats:650,term:5,senate:'APPOINTED',senSeats:200,senPower:0.25},
+    uk:      {label:'🇬🇧 영국형', form:'CONSTMON', regions:11, con:{method:'FPTP',lowerSeats:650,term:5,senate:'APPOINTED',senSeats:200,senPower:0.25},
               desc:'입헌군주 · 소선거구 · 임명 상원(귀족원, 형식적 권한)',
               seed:[ // 강한 양당 + 자유민주 제3당
                 {name:'보수당',     share:0.42, color:'#0087dc', cent:[-0.25, 0.10, 0.35,  0.10, -0.10,  0.05], rad:0.15},
@@ -4981,7 +5647,7 @@ class Sim {
                 {name:'자유민주당', share:0.11, color:'#faa61a', cent:[ 0.35,-0.10,-0.30, -0.05, -0.10,  0.10], rad:0.10},
                 {name:'개혁영국',   share:0.07, color:'#12b6cf', cent:[-0.05, 0.35, 0.15,  0.45,  0.00, -0.10], rad:0.30},
               ]},
-    israel:  {label:'🇮🇱 이스라엘형', form:'PARL', con:{method:'PR',lowerSeats:120,threshold:3.25,term:4,senate:'NONE'},
+    israel:  {label:'🇮🇱 이스라엘형', form:'PARL', regions:6, con:{method:'PR',lowerSeats:120,threshold:3.25,term:4,senate:'NONE'},
               desc:'내각제 · 전국 단일 비례 · 단원제 — 군소정당 난립',
               seed:[ // 극단적 파편화 + 종교정당 강세
                 {name:'리쿠드',       share:0.18, color:'#0038b8', cent:[-0.15, 0.20, 0.35,  0.30, -0.10,  0.00], rad:0.20},
@@ -4993,7 +5659,7 @@ class Sim {
                 {name:'토라유대주의연합',share:0.10, color:'#1a1a5e', cent:[ 0.00, 0.05, 0.50,  0.20, -0.10,  0.10], rad:0.15},
                 {name:'이스라엘베이테이누',share:0.10, color:'#0080c0', cent:[-0.30, 0.10, 0.30,  0.15, -0.15,  0.05], rad:0.15},
               ], allyMaxLRSeed:1.1},
-    swiss:   {label:'🇨🇭 스위스형', form:'PARL',   con:{method:'PR',lowerSeats:200,threshold:0,term:4,senate:'FEDERAL',senSeats:46,senPower:1.0},
+    swiss:   {label:'🇨🇭 스위스형', form:'PARL',   regions:13, con:{method:'PR',lowerSeats:200,threshold:0,term:4,senate:'FEDERAL',senSeats:46,senPower:1.0},
               desc:'내각제 · 비례(봉쇄 없음) · 연방 상원(주별 균등)',
               seed:[ // 안정적 4대정당 대연정 문화
                 {name:'스위스국민당', share:0.27, color:'#00994d', cent:[-0.20, 0.15, 0.30,  0.25, -0.10,  0.10], rad:0.12},
@@ -5907,6 +6573,25 @@ class Sim {
       });
     }
   }
+  // 지역별 접경 외국 계산 (지형 생성 시 1회)
+  computeBorders(){
+    this.regionBorder = new Array(NREG).fill(null).map(()=>[]);
+    if(typeof WORLD==='undefined' || !WORLD || !WORLD.foreignOwn) return;
+    const {T, owner, foreignOwn}=WORLD;
+    const W=T.W, H=T.H;
+    const seen=new Set();
+    for(let i=0;i<owner.length;i++){
+      const r=owner[i]; if(r<0||r>=NREG) continue;
+      const x=i%W, y=(i/W)|0;
+      for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){
+        const nx=x+dx, ny=y+dy;
+        if(nx<0||ny<0||nx>=W||ny>=H) continue;
+        const f=foreignOwn[ny*W+nx];
+        if(f>=0){ const k=r+':'+f;
+          if(!seen.has(k)){ seen.add(k); this.regionBorder[r].push(f); } }
+      }
+    }
+  }
   stepForeign(){
     if(this.tick%3!==0) return;
     this.initForeign();
@@ -5952,7 +6637,22 @@ class Sim {
     // ── 국내 정치 효과 ──
     // 안보 위협 → 결집 효과(rally around the flag)
     if(threat>0.2){
-      for(let i=0;i<N;i+=3){ this.fear[i]=clamp(this.fear[i]+threat*0.0018); this.tribalism[i]=clamp(this.tribalism[i]+threat*0.0012); }
+      if(!this.regionBorder) this.computeBorders();
+      // 접경 지역은 위협을 더 강하게 체감한다
+      const regThreat=new Float32Array(NREG);
+      for(let r=0;r<NREG;r++){
+        let t=0;
+        for(const fi of (this.regionBorder&&this.regionBorder[r])||[]){
+          const f=this.foreign[fi];
+          if(f && f.rel<-0.2) t += (-f.rel)*f.power;
+        }
+        regThreat[r]=t;
+      }
+      for(let i=0;i<N;i+=3){
+        const extra = regThreat[this.region[i]]*0.0022;
+        this.fear[i]=clamp(this.fear[i]+threat*0.0018+extra);
+        this.tribalism[i]=clamp(this.tribalism[i]+threat*0.0012+extra*0.7);
+      }
       if(lead) lead.support=clamp(lead.support*(1+threat*0.0016),0,1);
     }
     // 무역·제재 → 경제
@@ -6231,6 +6931,12 @@ const UI={
       document.querySelectorAll('#parlViewBar .viewChip').forEach(c=>c.classList.toggle('sel', c===v));
       this.renderParliament();
     });
+    // ── 표결 정렬 모드 ──
+    document.addEventListener('click',e=>{
+      const b=e.target.closest('[data-vsort]'); if(!b) return;
+      e.stopPropagation();
+      this._voteSort=b.dataset.vsort; this.renderIssues();
+    });
     // ── 접이식 심화 패널 (기본 접힘) ──
     document.addEventListener('click',e=>{
       const h=e.target.closest('.panel.fold > h3'); if(!h) return;
@@ -6258,6 +6964,7 @@ const UI={
         this.render(true); }
       if(e.target.id==='estateLockTog'){ this.sim.estateLock=e.target.checked; }
       if(e.target.id==='cwTog'){ this.sim.civilWarOn=e.target.checked; }
+      if(e.target.id==='cSeedRegion'){ this._seedRegionOnPreset=e.target.checked; }
       if(e.target.id==='warTog'){ this.sim.warOn=e.target.checked; }
       if(e.target.id==='fAuto'){ this.sim.fiscal.auto=e.target.checked;
         this.sim.pushNews(1,'norm', e.target.checked?'재정 운영을 <b>집권당</b>에 맡긴다':'<b>재정 직접 통제</b> — 신의 손이 예산을 쥔다');
@@ -6615,7 +7322,25 @@ const UI={
     $('#constApply').onclick=()=>{
       if(this._draftPresetKey && this._seedOnPreset){
         // 프리셋 + 정당 구도 리셋: 제도·정당을 한 번에 적용
-        this.sim.applyPresetNation(this._draftPresetKey, true);
+        const PK=this._draftPresetKey;
+        const PN=Sim.PRESETS[PK];
+        // 지역 수까지 반영: 지형을 새로 만들고 시뮬을 재시작한다
+        if(this._seedRegionOnPreset && PN && PN.regions && PN.regions!==NREG){
+          const seed=(Math.random()*1e9)|0;
+          applyGeneratedWorld(PN.regions, seed, 0.60);
+          const sd=(Math.random()*1e9)|0;
+          if(window.POLIS_setSeed) window.POLIS_setSeed(sd);
+          this.sim=new Sim();
+          this.sim.applyPresetNation(PK, true);
+          this._parlKey=''; this._plOrder=null; this._citIdx=-1;
+          this.buildMap && this.buildMap();
+          this.sim.pushNews(2,'norm',`<b>${PN.label}</b> 적용 — 지역 ${PN.regions}개로 국토 재생성`);
+          this._draftPresetKey=null;
+          $('#constModal').style.display='none';
+          this.render(true);
+          return;
+        }
+        this.sim.applyPresetNation(PK, true);
         this._draftPresetKey=null;
       } else if((this.sim.rigidity||'rigid')==='free'){
         if(this._draftForm!==this.sim.govForm){
@@ -6810,6 +7535,26 @@ const UI={
 
   // ── 의회 반원 ──
   _parlKey:'',
+  // 계파 단위 균일색 — 정당색 유지, 계파 인덱스로 명도만 변주
+  _facColorOf(p, g, s){
+    if(g.fid==null) return p.color;
+    const facs=(p&&p.factions)||[];
+    const idx=Math.max(0, facs.findIndex(f=>f.fid===g.fid));
+    const dom=facs.find(f=>f.dom);
+    let dl=0;
+    if(!dom || g.fid!==dom.fid){
+      const step=(Math.floor(idx/2)+1)*13;
+      dl = (idx%2===0? +step : -step);
+    }
+    return this._shade(p.color, dl);
+  },
+  _shade(hex, dl){
+    const c=hex.replace('#',''); if(c.length!==6) return hex;
+    let r=parseInt(c.slice(0,2),16), g2=parseInt(c.slice(2,4),16), b=parseInt(c.slice(4,6),16);
+    const mix=(v)=> dl>=0? Math.round(v+(255-v)*(dl/100)) : Math.round(v*(1+dl/100));
+    r=Math.max(0,Math.min(255,mix(r))); g2=Math.max(0,Math.min(255,mix(g2))); b=Math.max(0,Math.min(255,mix(b)));
+    return '#'+[r,g2,b].map(v=>v.toString(16).padStart(2,'0')).join('');
+  },
   // 정당색을 유지한 채 계파별로 명도만 변주한다
   _facTint(hex, m, s){
     if(!m || m.fid==null) return hex;
@@ -6852,18 +7597,55 @@ const UI={
     const seats=[]; const seatMeta=[];
     ps.forEach(p=>{
       if(facOn){
-        // 계파별로 의원을 좌우(개인 이념)순으로 정렬해 칠한다
-        const mine=s.mps.filter(m=>m.pid===p.id).sort((a,b)=>s.lr(a.cent)-s.lr(b.cent));
-        for(let i=0;i<p.seats;i++){
-          const m=mine[i];
-          seats.push(m? this._facTint(p.color, m, s) : p.color);
-          seatMeta.push(m? {party:p.name, fac:m.facName, name:m.name} : {party:p.name});
+        // 정당 블록은 유지하되, 정당 안에서 계파를 좌→우(계파 평균 LR)순으로 배열
+        const mine=s.mps.filter(m=>m.pid===p.id);
+        const grp=new Map();                       // fid -> {n, lrSum, name, color, fid}
+        for(const m of mine){
+          const k = m.fid==null? '_' : m.fid;
+          if(!grp.has(k)) grp.set(k,{n:0, lrSum:0, name:m.facName||'무계파', fid:m.fid});
+          const g=grp.get(k); g.n++; g.lrSum+=s.lr(m.cent);
         }
+        const groups=[...grp.values()].map(g=>({...g, lr:g.n? g.lrSum/g.n : 0}))
+          .sort((a,b)=>a.lr-b.lr);                 // 계파 평균 LR 오름차순 = 좌 → 우
+        let placed=0;
+        for(const g of groups){
+          const col=this._facColorOf(p, g, s);     // 계파별 균일색
+          for(let i=0;i<g.n && placed<p.seats;i++,placed++){
+            seats.push(col);
+            seatMeta.push({party:p.name, fac:g.name, n:g.n, lr:g.lr});
+          }
+        }
+        while(placed<p.seats){ seats.push(p.color); seatMeta.push({party:p.name}); placed++; }
       } else {
         for(let i=0;i<p.seats;i++){ seats.push(p.color); seatMeta.push({party:p.name}); }
       }
     });
     this._seatMeta=seatMeta;
+    // 계파 범례 (계파색 ON일 때)
+    const legHost=$('#facLegend');
+    if(legHost){
+      if(!facOn){ legHost.style.display='none'; }
+      else {
+        legHost.style.display='block';
+        const rows=[];
+        for(const p of ps){
+          const mine=s.mps.filter(m=>m.pid===p.id);
+          if(!mine.length) continue;
+          const g=new Map();
+          for(const m of mine){ const k=m.fid==null?'_':m.fid;
+            if(!g.has(k)) g.set(k,{n:0,sum:0,name:m.facName||'무계파',fid:m.fid});
+            const x=g.get(k); x.n++; x.sum+=s.lr(m.cent); }
+          const arr=[...g.values()].map(x=>({...x,lr:x.sum/x.n})).sort((a,b)=>a.lr-b.lr);
+          rows.push(`<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:10px;padding:2px 0">
+            <span style="min-width:82px;color:var(--tx2)">${p.name}</span>`
+            + arr.map(x=>`<span style="display:inline-flex;align-items:center;gap:3px;color:var(--tx3)">
+                <span style="width:8px;height:8px;border-radius:2px;background:${this._facColorOf(p,x,s)}"></span>
+                ${x.name} ${x.n}</span>`).join('')
+            + `</div>`);
+        }
+        legHost.innerHTML = '<div style="font-size:9px;color:var(--tx3);letter-spacing:1px;margin-bottom:3px">계파 구성 — 각 정당 안에서 좌 → 우</div>' + rows.join('');
+      }
+    }
     const LS2=s.con.lowerSeats;
     while(seats.length<LS2)seats.push('rgba(120,140,180,0.18)');
     seats.length=LS2;
@@ -6894,7 +7676,7 @@ const UI={
       let html='';
       pos.forEach((q,idx)=>{
         const mt=this._seatMeta&&this._seatMeta[idx];
-        const tip = mt? (mt.name? `${mt.party} · ${mt.fac||'무계파'} · ${mt.name}` : mt.party) : '';
+        const tip = mt? (mt.fac? `${mt.party} · ${mt.fac} (${mt.n}석, LR ${mt.lr.toFixed(2)})` : mt.party) : '';
         html+=`<circle cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="${dot.toFixed(2)}" fill="${seats[idx]||'#222'}">${tip?`<title>${tip}</title>`:''}</circle>`;
       });
       svg.innerHTML=html;
@@ -7140,17 +7922,26 @@ const UI={
       const facOn2 = !!(this._parlOverlay&&this._parlOverlay.fac) && s.mpOn && s.mps && s.mps.length;
       let mpDots='';
       if(facOn2){
-        mpDots = s.mps.map(m=>{
-          const pp=s.parties.find(q=>q.id===m.pid); if(!pp) return '';
-          const lr=s.lr(m.cent);
-          const x=clamp((lr+3)/6)*100;
-          const y=18+((m.sid*37)%64);      // 세로로 흩뿌리기
-          const col=this._facTint(pp.color, m, s);
-          return `<div title="${pp.name} · ${m.facName||'무계파'} · ${m.name} (${m.terms}선)"
-            style="position:absolute;left:${x}%;top:${y}%;transform:translate(-50%,-50%);width:5px;height:5px;border-radius:50%;background:${col};opacity:0.9"></div>`;
+        // 계파별 원: 위치=계파 평균 LR, 크기=의석
+        const fg=new Map();
+        for(const m of s.mps){
+          const k=m.pid+'#'+(m.fid==null?'_':m.fid);
+          if(!fg.has(k)) fg.set(k,{pid:m.pid, fid:m.fid, name:m.facName||'무계파', n:0, lrSum:0});
+          const g=fg.get(k); g.n++; g.lrSum+=s.lr(m.cent);
+        }
+        const arr=[...fg.values()].map(g=>({...g, lr:g.n?g.lrSum/g.n:0}))
+          .sort((a,b)=>b.n-a.n);
+        mpDots = arr.map((g,gi)=>{
+          const pp=s.parties.find(q=>q.id===g.pid); if(!pp) return '';
+          const col=this._facColorOf(pp, g, s);
+          const x=clamp((g.lr+3)/6)*100;
+          const r=7+Math.sqrt(g.n/Math.max(1,totalSeats))*40;
+          const y=50+((gi%3)-1)*17;     // 겹침 완화용 3단 배치
+          return `<div title="${pp.name} · ${g.name} ${g.n}석 (LR ${g.lr.toFixed(2)})"
+            style="position:absolute;left:${x}%;top:${y}%;transform:translate(-50%,-50%);width:${r}px;height:${r}px;border-radius:50%;background:${col};border:1.5px solid rgba(0,0,0,0.35);box-shadow:0 0 7px ${col}66"></div>`;
         }).join('');
       }
-      sv.innerHTML=`<div style="font-size:10.5px;color:var(--tx3);letter-spacing:1px;margin-bottom:8px">좌우 이념 스펙트럼 — ${facOn2?'점 = 의원 개인 (계파색)':'원 크기 = 의석'}</div>
+      sv.innerHTML=`<div style="font-size:10.5px;color:var(--tx3);letter-spacing:1px;margin-bottom:8px">좌우 이념 스펙트럼 — ${facOn2?'원 = 계파 (크기 = 의석)':'원 크기 = 의석'}</div>
         <div style="position:relative;height:70px;border-radius:10px;background:linear-gradient(90deg,rgba(90,140,255,0.12),rgba(120,140,180,0.05) 50%,rgba(255,107,90,0.12));margin-bottom:6px">
           <div style="position:absolute;left:50%;top:8px;bottom:8px;width:1px;background:rgba(180,200,240,0.18)"></div>
           ${facOn2? mpDots : dots}
@@ -7294,16 +8085,41 @@ const UI={
     const vrs=(s.voteRecords||[]).slice(0,8);
     if(!vrs.length){ vh.innerHTML='<div class="muted" style="font-size:10.5px">아직 처리된 법안이 없다 — 쟁점이 무르익으면 의회에 상정된다.</div>'; return; }
     const vcolS={yes:'#5ae0b4',no:'#ff6262',abst:'#6b7a99'};
-    vh.innerHTML='<div style="font-size:10px;color:var(--tx3);letter-spacing:1px;margin-bottom:7px">법안 표결 이력 — 정당 띠를 보면 누가 찬반했는지 알 수 있다 · 클릭하면 상세</div>'+
+    const vmode = this._voteSort || 'party';
+    vh.innerHTML='<div style="display:flex;align-items:center;gap:7px;margin-bottom:7px;flex-wrap:wrap">'
+      + '<span style="font-size:10px;color:var(--tx3);letter-spacing:1px">법안 표결 이력</span>'
+      + `<button class="tchip ${vmode==='party'?'on':'off'}" data-vsort="party">정당순</button>`
+      + `<button class="tchip ${vmode==='fac'?'on':'off'}" data-vsort="fac">계파순</button>`
+      + '<span style="font-size:9.5px;color:var(--tx3)">클릭하면 상세</span></div>'+
       vrs.map((v,i)=>{
         const tot=v.yes+v.no+v.abst||1;
-        // 정당별 찬반 스트립 (의석 폭 = 정당 크기, 색 = 표결)
         const lrO=id=>{ const p=s.parties.find(q=>q.id===id); return p? s.lr(p.cent) : 0; };
-        const strip=[...v.rows].sort((a,b)=>lrO(a.pid)-lrO(b.pid)).map(r=>
-          `<div title="${r.name} ${r.seats}석 ${ {yes:'찬성',no:'반대',abst:'기권'}[r.vote] }${r.defect?' (이탈 '+r.defect+')':''}"
-            style="flex:${r.seats};background:${vcolS[r.vote]};border-right:1px solid rgba(10,14,26,0.55);position:relative">
-            ${r.defect?`<div style="position:absolute;right:0;top:0;bottom:0;width:${Math.min(60,r.defect/Math.max(r.seats,1)*100)}%;background:${vcolS[r.vote==='yes'?'no':'yes']};opacity:0.85"></div>`:''}
-          </div>`).join('');
+        let strip;
+        if(vmode==='fac'){
+          // 계파 단위로 쪼개서 전체를 좌→우로 정렬 (정당 경계 무시)
+          const units=[];
+          for(const r of v.rows){
+            if(r.facs && r.facs.length){
+              for(const f of r.facs){ if(f.seats>0) units.push({
+                seats:f.seats, vote:f.vote, color:f.pcolor||r.color, lr:(f.lr!=null?f.lr:lrO(r.pid)),
+                label:`${f.pname||r.name} · ${f.name}`, defected:f.defected }); }
+            } else if(r.seats>0){
+              units.push({seats:r.seats, vote:r.vote, color:r.color, lr:lrO(r.pid), label:r.name});
+            }
+          }
+          units.sort((a,b)=>a.lr-b.lr);
+          strip=units.map(u=>
+            `<div title="${u.label} ${u.seats}석 ${ {yes:'찬성',no:'반대',abst:'기권'}[u.vote] }${u.defected?' · 당론 이탈':''} (LR ${u.lr.toFixed(2)})"
+              style="flex:${u.seats};background:${vcolS[u.vote]};border-right:1px solid rgba(10,14,26,0.55);position:relative">
+              ${u.defected?`<div style="position:absolute;left:0;right:0;top:0;height:2px;background:var(--am)"></div>`:''}
+            </div>`).join('');
+        } else {
+          strip=[...v.rows].sort((a,b)=>lrO(a.pid)-lrO(b.pid)).map(r=>
+            `<div title="${r.name} ${r.seats}석 ${ {yes:'찬성',no:'반대',abst:'기권'}[r.vote] }${r.defect?' (이탈 '+r.defect+')':''}"
+              style="flex:${r.seats};background:${vcolS[r.vote]};border-right:1px solid rgba(10,14,26,0.55);position:relative">
+              ${r.defect?`<div style="position:absolute;right:0;top:0;bottom:0;width:${Math.min(60,r.defect/Math.max(r.seats,1)*100)}%;background:${vcolS[r.vote==='yes'?'no':'yes']};opacity:0.85"></div>`:''}
+            </div>`).join('');
+        }
         return `<div data-vote="${i}" style="padding:5px 0;border-bottom:1px solid rgba(130,170,255,0.06);cursor:pointer">
           <div style="display:flex;align-items:center;gap:8px;font-size:11px">
             <span style="font-family:var(--mono);font-size:10px;color:var(--cy);min-width:38px">${v.y}년</span>
@@ -7317,7 +8133,7 @@ const UI={
       + '<span><span style="display:inline-block;width:8px;height:8px;background:#5ae0b4;border-radius:2px;margin-right:3px"></span>찬성</span>'
       + '<span><span style="display:inline-block;width:8px;height:8px;background:#ff6262;border-radius:2px;margin-right:3px"></span>반대</span>'
       + '<span><span style="display:inline-block;width:8px;height:8px;background:#6b7a99;border-radius:2px;margin-right:3px"></span>기권</span>'
-      + '<span style="color:var(--am)">띠 끝의 다른 색 = 계파 이탈표</span></div>';
+      + `<span style="color:var(--am)">${vmode==='fac'?'윗변 주황선 = 당론 이탈 계파':'띠 끝의 다른 색 = 계파 이탈표'}</span></div>`;
     vh.onclick=e=>{ const r=e.target.closest('[data-vote]'); if(!r)return; this.showVote(+r.dataset.vote); };
   },
   showVote(idx){
@@ -7325,7 +8141,29 @@ const UI={
     const vlab={yes:'찬성',no:'반대',abst:'기권'}, vcol={yes:'#5ae0b4',no:'#ff6262',abst:'#8fa3c8'};
     const facType={est:'주류',rad:'강경',ref:'개혁',pers:'인물'};
     const lrOf=id=>{ const p=s.parties.find(q=>q.id===id); return p? s.lr(p.cent) : 0; };
-    const rows=v.rows.slice().sort((a,b)=>lrOf(a.pid)-lrOf(b.pid)).map((r,ri)=>{
+    const vsMode=(this._voteSort||'party');
+    // 계파순: 계파를 평면으로 펼쳐 좌→우 정렬 (정당 경계 무시)
+    const flatFac = vsMode==='fac' ? (()=>{
+      const u=[];
+      for(const r of v.rows){
+        if(r.facs && r.facs.length){
+          for(const f of r.facs){ if(f.seats>0) u.push({
+            name:`${f.pname||r.name} · ${f.name}`, color:f.pcolor||r.color, seats:f.seats,
+            vote:f.vote, lr:(f.lr!=null?f.lr:lrOf(r.pid)), leader:f.leader, defected:f.defected }); }
+        } else if(r.seats>0) u.push({name:r.name, color:r.color, seats:r.seats, vote:r.vote, lr:lrOf(r.pid)});
+      }
+      return u.sort((a,b)=>a.lr-b.lr);
+    })() : null;
+    const rows = flatFac ? flatFac.map(u=>
+      `<div style="display:flex;align-items:center;gap:8px;font-size:11px;padding:3px 0;border-bottom:1px solid rgba(130,170,255,0.06)">
+        <div class="pdot" style="background:${u.color}"></div>
+        <span style="flex:1">${u.name}${u.leader?` <span style="font-size:9.5px;color:var(--tx3)">▸${u.leader}</span>`:''}</span>
+        <span style="font-family:var(--mono);font-size:9.5px;color:var(--tx3)">LR ${u.lr.toFixed(2)}</span>
+        <span style="font-family:var(--mono);font-size:10px;color:var(--tx3)">${u.seats}석</span>
+        <span style="min-width:44px;text-align:center;font-size:10px;padding:2px 6px;border-radius:5px;background:${u.vote==='yes'?'rgba(90,224,180,0.16)':u.vote==='no'?'rgba(255,98,98,0.16)':'rgba(140,160,200,0.12)'};color:${vcol[u.vote]}">${vlab[u.vote]}</span>
+        ${u.defected?'<span style="font-size:9px;color:var(--am)">당론이탈</span>':'<span style="width:44px"></span>'}
+      </div>`)
+    : v.rows.slice().sort((a,b)=>lrOf(a.pid)-lrOf(b.pid)).map((r,ri)=>{
       const hasFacs = r.facs && r.facs.length>1;
       const facHtml = hasFacs? `<div data-facof="${ri}" style="display:none;padding:3px 0 6px 22px">`+
         r.facs.filter(f=>f.seats>0).sort((a,b)=>b.seats-a.seats).map(f=>
@@ -7713,6 +8551,7 @@ const UI={
       <div class="cSec" style="border-top:none;padding-top:0"><h4>국가 프리셋 — 클릭하면 전체 적용</h4>
         <div class="cOpts" id="cPreset">${presetBtns}</div>
         <label class="cChk" style="margin-top:8px"><input type="checkbox" id="cSeedParty" ${this._seedOnPreset?'checked':''}>프리셋 선택 시 그 나라 형태로 <b>정당 구도도 리셋</b></label>
+        <label class="cChk" style="margin-top:5px"><input type="checkbox" id="cSeedRegion" ${this._seedRegionOnPreset?'checked':''}>프리셋의 <b>지역 수</b>까지 반영 (지형 재생성 · 진행 중 시뮬 초기화)</label>
         <div class="cHint" style="margin-left:0;margin-top:5px">켜면 기존 정당을 정리하고 그 나라의 전형적인 정당 생태계(정당 수·지지율·이념 구도)로 새로 시작한다. 끄면 제도만 바뀌고 지금 정당들은 그대로 유지된다.</div>
         </div>
       <div class="cSec"><h4>정부 형태</h4>
@@ -8974,15 +9813,52 @@ const UI={
     let html='';
     // 바다 배경 + 섬 분리선 느낌
     html+=`<defs><filter id="seaGlow"><feGaussianBlur stdDeviation="2"/></filter></defs>`;
-    this.mapRegions=[]; this._regShapes=REGION_SHAPES;
-    for(let id=0;id<REGION_SHAPES.length;id++){
-      const poly=REGION_SHAPES[id];
-      const d='M'+poly.map(p=>p.join(',')).join(' L')+' Z';
-      html+=`<path class="region" id="reg${id}" d="${d}"><title></title></path>`;
-      const cx=poly.reduce((a,p)=>a+p[0],0)/poly.length, cy=poly.reduce((a,p)=>a+p[1],0)/poly.length;
-      const short=REGION_NAMES[id].replace(/\s/g,'').slice(0,4);
-      html+=`<text x="${cx.toFixed(0)}" y="${cy.toFixed(0)}" text-anchor="middle" fill="rgba(235,243,255,0.82)" font-size="8.5" font-family="var(--mono)" pointer-events="none">${short}</text>`;
-      this.mapRegions.push(id);
+    this.mapRegions=[];
+    if(typeof WORLD!=='undefined' && WORLD && WORLD.paths && WORLD.paths.length===NREG){
+      // ── 지형 기반 생성 지도 ──
+      this._regShapes=null;
+      if(WORLD.seaD) html+=`<path d="${WORLD.seaD}" fill="rgba(30,58,110,0.30)" stroke="none"/>`;
+      for(let id=0;id<NREG;id++){
+        const d=WORLD.paths[id]; if(!d) continue;
+        html+=`<path class="region" id="reg${id}" d="${d}"><title></title></path>`;
+      }
+      // 인접국 영토
+      if(WORLD.foreignPaths && WORLD.foreignPaths.length){
+        const FN=(this.sim.foreign&&this.sim.foreign.length)? this.sim.foreign : [];
+        WORLD.foreignPaths.forEach((d,fi)=>{
+          if(!d) return;
+          const f=FN[fi];
+          const rel=f? f.rel : 0;
+          const col = rel>0.5? 'rgba(90,224,180,0.20)' : rel<-0.4? 'rgba(255,98,98,0.22)' : 'rgba(140,160,200,0.16)';
+          const stk = rel>0.5? 'rgba(90,224,180,0.55)' : rel<-0.4? 'rgba(255,98,98,0.6)' : 'rgba(140,160,200,0.45)';
+          html+=`<path d="${d}" fill="${col}" stroke="${stk}" stroke-width="1" stroke-dasharray="3 2" pointer-events="none"/>`;
+          if(f){
+            const bb=WORLD.foreignPaths[fi];
+            const m=/M([\d.]+) ([\d.]+)/.exec(bb);
+            if(m) html+=`<text x="${m[1]}" y="${m[2]}" fill="${stk}" font-size="7.5" font-family="var(--mono)" pointer-events="none" style="text-shadow:0 0 3px #000">${f.name}</text>`;
+          }
+        });
+      }
+      if(WORLD.riverD) html+=`<path d="${WORLD.riverD}" fill="none" stroke="rgba(90,180,255,0.42)" stroke-width="1.1" pointer-events="none"/>`;
+      const sx=TERRAIN.VIEW_W/WORLD.T.W, sy=TERRAIN.VIEW_H/WORLD.T.H;
+      for(let id=0;id<NREG;id++){
+        const t=WORLD.traits[id]; if(!t) continue;
+        const cx=t._cx*sx, cy=t._cy*sy;
+        const short=REGION_NAMES[id].replace(/\s/g,'').slice(0,4);
+        html+=`<text x="${cx.toFixed(0)}" y="${cy.toFixed(0)}" text-anchor="middle" fill="rgba(235,243,255,0.86)" font-size="8" font-family="var(--mono)" pointer-events="none" style="text-shadow:0 0 3px rgba(0,0,0,0.8)">${short}</text>`;
+        this.mapRegions.push(id);
+      }
+    } else {
+      this._regShapes=REGION_SHAPES;
+      for(let id=0;id<REGION_SHAPES.length;id++){
+        const poly=REGION_SHAPES[id];
+        const d='M'+poly.map(p=>p.join(',')).join(' L')+' Z';
+        html+=`<path class="region" id="reg${id}" d="${d}"><title></title></path>`;
+        const cx=poly.reduce((a,p)=>a+p[0],0)/poly.length, cy=poly.reduce((a,p)=>a+p[1],0)/poly.length;
+        const short=REGION_NAMES[id].replace(/\s/g,'').slice(0,4);
+        html+=`<text x="${cx.toFixed(0)}" y="${cy.toFixed(0)}" text-anchor="middle" fill="rgba(235,243,255,0.82)" font-size="8.5" font-family="var(--mono)" pointer-events="none">${short}</text>`;
+        this.mapRegions.push(id);
+      }
     }
     svg.innerHTML=html;
   },
@@ -9340,8 +10216,39 @@ window.addEventListener('DOMContentLoaded',()=>{
     const top=REGION_TRAITS.map((t,i)=>({i,p:t.popW/tot*100})).sort((a,b)=>b.p-a.p)[0];
     info.textContent=`최대 지역: ${REGION_NAMES[top.i]} 인구 ${top.p.toFixed(1)}% · 부 ${REGION_TRAITS[top.i].wealth.toFixed(2)}`;
   };
+  const terrBox=document.getElementById('introTerrain');
+  let tnSeed=(Math.random()*1e9)|0;
+  const drawPreview=()=>{
+    const n=+document.getElementById('tnCount').value;
+    const lr=+document.getElementById('tnLand').value/100;
+    const w=applyGeneratedWorld(n, tnSeed, lr);
+    const sv=document.getElementById('tnPreview');
+    const PAL=['#54e0ff','#9dff5a','#ffc14d','#ff6b8a','#b08cff','#5ae0b4','#ff9f4d','#7bb0ff',
+               '#e0d24d','#4dd0c0','#c98cff','#ff8ab0','#8ae06a','#ffb24d','#6ac4ff','#d4a5ff',
+               '#a0e05a','#ff7a9c','#5ac8e0','#ffd24d'];
+    let h='';
+    if(w.seaD) h+=`<path d="${w.seaD}" fill="rgba(30,58,110,0.35)"/>`;
+    w.paths.forEach((d,i)=>{ if(d) h+=`<path d="${d}" fill="${PAL[i%PAL.length]}" fill-opacity="0.55" stroke="rgba(10,16,32,0.75)" stroke-width="0.8"/>`; });
+    if(w.riverD) h+=`<path d="${w.riverD}" fill="none" stroke="rgba(90,180,255,0.5)" stroke-width="1.2"/>`;
+    const sx=TERRAIN.VIEW_W/w.T.W, sy=TERRAIN.VIEW_H/w.T.H;
+    w.traits.forEach((t,i)=>{ h+=`<text x="${(t._cx*sx).toFixed(0)}" y="${(t._cy*sy).toFixed(0)}" text-anchor="middle" fill="rgba(240,246,255,0.9)" font-size="7.5" style="text-shadow:0 0 3px #000">${w.names[i].replace(/\s/g,'').slice(0,4)}</text>`; });
+    sv.innerHTML=h;
+    const ic={}; w.traits.forEach(t=>ic[t.ind]=(ic[t.ind]||0)+1);
+    const IL={gov:'행정',tech:'첨단',port:'항만',farm:'농업',mine:'광공업'};
+    document.getElementById('tnInfo').textContent =
+      Object.entries(ic).map(([k,v])=>IL[k]+' '+v).join(' · ');
+  };
+  const cntEl=document.getElementById('tnCount'), landEl=document.getElementById('tnLand');
+  if(cntEl) cntEl.oninput=()=>{ document.getElementById('tnCountV').textContent=cntEl.value; drawPreview(); };
+  if(landEl) landEl.oninput=()=>{ document.getElementById('tnLandV').textContent=landEl.value+'%'; drawPreview(); };
+  const rr=document.getElementById('tnReroll');
+  if(rr) rr.onclick=()=>{ tnSeed=(Math.random()*1e9)|0; drawPreview(); };
+
   if(modeBar) modeBar.onclick=e=>{ const b=e.target.closest('[data-rgm]'); if(!b)return;
     regMode=b.dataset.rgm;
+    if(terrBox) terrBox.style.display = regMode==='terrain'?'block':'none';
+    if(regMode==='terrain'){ drawPreview(); }
+    else if(typeof resetWorldToDefault==='function' && regMode!=='custom') resetWorldToDefault();
     [...modeBar.querySelectorAll('[data-rgm]')].forEach(x=>x.classList.toggle('on',x===b));
     applyRegionSetup(regMode==='custom'?'default':regMode);
     custBox.style.display = regMode==='custom'?'block':'none';
