@@ -406,7 +406,8 @@ canvas.chart.tall{height:210px}
       <p style="margin-bottom:0;color:#8fa3c8;font-size:12px">이 점에 동의하고, 시뮬레이션 결과를 실제 정당·정치인에 대한 사실이나 예측으로 받아들이지 않는다는 것을 이해했다면 아래 버튼을 눌러 시작하세요.</p>
     </div>
     <div style="margin-top:20px;padding-top:16px;border-top:1px solid rgba(130,170,255,0.15)">
-      <div style="font-size:11px;letter-spacing:2px;color:#8fa3c8;margin-bottom:9px">지역 구조 (선택)</div>
+      <button id="introAdvToggle" style="width:100%;text-align:left;background:none;border:none;color:#8fa3c8;font-size:11px;letter-spacing:2px;margin-bottom:9px;cursor:pointer;font-family:inherit;padding:0">▸ 국토 설정 (선택)</button>
+      <div id="introAdv" style="display:none">
       <div style="display:flex;gap:6px;flex-wrap:wrap" id="introRegMode">
         <button class="cOpt on" data-rgm="default">기본 (아스텔)</button>
         <button class="cOpt" data-rgm="random">무작위 생성</button>
@@ -431,7 +432,8 @@ canvas.chart.tall{height:210px}
         <svg id="tnPreview" viewBox="0 0 460 330" style="width:100%;height:150px;background:rgba(12,20,42,0.6);border-radius:8px;border:1px solid rgba(130,170,255,0.18)"></svg>
       </div>
       <div id="introRegCustom" style="display:none;margin-top:10px;max-height:220px;overflow-y:auto"></div>
-      <div id="introRegInfo" style="font-size:10.5px;color:#8fa3c8;margin-top:7px">기본 가상국가 아스텔의 인구·부 분포를 사용합니다.</div>
+      <div id="introRegInfo" style="font-size:10.5px;color:#8fa3c8;margin-top:7px">지형이 자동 생성됩니다. 바꾸려면 위에서 고르세요.</div>
+      </div>
     </div>
     <button id="introAgree" style="margin-top:18px;width:100%;padding:12px;border-radius:12px;border:none;background:#54e0ff;color:#05070d;font-weight:700;font-size:14px;cursor:pointer;font-family:inherit">이해했습니다 — 시작하기</button>
   </div>
@@ -1172,6 +1174,7 @@ const REGIME = {
 // 고도 지도를 먼저 만들고, 자연 경계(해안·산맥·강)를 따라 지역을 나눈다.
 // 지역의 산업·도시화·부는 지형에서 도출되므로 인과가 생긴다.
 
+function clampT(v,a,b){ return v<a?a:v>b?b:v; }
 const TERRAIN = {
   W: 92, H: 66,          // 격자 해상도
   VIEW_W: 460, VIEW_H: 330,
@@ -1209,11 +1212,14 @@ function generateTerrain(seed){
   for(let y=0;y<H;y++){
     for(let x=0;x<W;x++){
       const nx=(x/W-0.5)*2, ny=(y/H-0.5)*2;
-      const d=Math.sqrt(nx*nx*0.85 + ny*ny*1.15);      // 가로로 약간 긴 대륙
       const base=_fbm(x/13, y/13, seed, 5);
       const ridge=Math.abs(_fbm(x/9+40, y/9+40, seed+555, 4)-0.5)*2;  // 산맥
       let e = base*0.80 + (1-ridge)*0.20;
-      e -= Math.pow(Math.max(0, d-0.28), 1.7)*1.35;     // 가장자리 침강
+      // 가장자리 침강: 아주 바깥쪽(5% 프레임)만 확실히 깎아 해안을 만들고,
+      // 그 안쪽은 노이즈가 육지/바다를 결정하게 둔다 — 그래야 가장자리에도 육지 띠가 남는다.
+      // 아주 약한 중심 편향만 준다 — 대부분은 노이즈가 결정하므로 가장자리에도 육지가 남는다
+      const d=Math.sqrt(nx*nx*0.6 + ny*ny*1.0);
+      e -= d*0.16;
       elev[y*W+x] = e;
       moist[y*W+x] = _fbm(x/16+200, y/16+200, seed+911, 4);
     }
@@ -1238,13 +1244,23 @@ function findSeaLevel(elev, targetLand){
 function traceRivers(T, sea, count){
   const {elev,W,H}=T;
   const river=new Uint8Array(W*H);
+  const tracks=[];                       // 연속 경로 (셀 인덱스 배열)
+  // 강 발원지: 육지 고도의 상위 25% (절대값이 아닌 상대 기준 — 지형이 완만해도 항상 후보가 있다)
+  const landElev=[];
+  for(let i=0;i<elev.length;i++) if(elev[i]>sea) landElev.push(elev[i]);
+  landElev.sort((a,b)=>a-b);
+  const hiThresh = landElev.length? landElev[Math.floor(landElev.length*0.75)] : sea;
   const cand=[];
-  for(let i=0;i<elev.length;i++) if(elev[i]>sea+0.22) cand.push(i);
-  if(!cand.length) return river;
-  for(let r=0;r<count;r++){
-    let cur=cand[(r*7919 + 13) % cand.length];
-    for(let step=0; step<W*2; step++){
-      river[cur]=1;
+  for(let i=0;i<elev.length;i++) if(elev[i]>=hiThresh) cand.push(i);
+  if(!cand.length) return {river, tracks};
+  cand.sort((a,b)=>elev[b]-elev[a]);     // 높은 곳부터
+  const used=new Uint8Array(W*H);
+  for(let r=0, tried=0; r<count && tried<cand.length; tried++){
+    const start=cand[Math.floor(tried*cand.length/Math.max(1,count*3)) % cand.length];
+    if(used[start]) continue;
+    const path=[]; let cur=start; let ok=false;
+    for(let step=0; step<W*3; step++){
+      path.push(cur); river[cur]=1; used[cur]=1;
       const x=cur%W, y=(cur/W)|0;
       let best=-1, bestE=elev[cur];
       for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){
@@ -1254,11 +1270,14 @@ function traceRivers(T, sea, count){
         const ni=ny*W+nx;
         if(elev[ni]<bestE){ bestE=elev[ni]; best=ni; }
       }
-      if(best<0 || elev[best]<=sea) break;
+      if(best<0) break;
+      if(elev[best]<=sea){ path.push(best); ok=true; break; }   // 바다 도달
+      if(used[best] && path.length>3){ path.push(best); ok=true; break; }  // 합류
       cur=best;
     }
+    if(path.length>=4){ tracks.push(path); r++; }
   }
-  return river;
+  return {river, tracks};
 }
 
 // 육지 연결 요소(대륙·섬) 라벨링
@@ -1289,65 +1308,12 @@ function labelLandmasses(T, sea){
   return {lab, sizes, main, count:cur};
 }
 
-// 인접국 영토 할당: 본토의 가장자리 쪽 일부를 외국으로 떼어낸다
-// foreignN개의 외국이 대륙 변두리에 자리잡는다.
-function assignForeign(T, sea, LM, foreignN, seed){
-  const {elev,W,H}=T;
-  const own=new Int16Array(W*H).fill(-1);   // -1 국내, 0..n-1 외국
-  if(foreignN<=0) return {own, seeds:[]};
-  // 본토 가장자리 후보: 지도 경계에 가까운 육지
-  const edge=[];
-  for(let i=0;i<elev.length;i++){
-    if(elev[i]<=sea || LM.lab[i]!==LM.main) continue;
-    const x=i%W, y=(i/W)|0;
-    const dEdge=Math.min(x, y, W-1-x, H-1-y);
-    if(dEdge < Math.min(W,H)*0.22) edge.push(i);
-  }
-  if(edge.length<foreignN*30) return {own, seeds:[]};
-  // 외국 씨앗: 서로 멀리
-  const seeds=[];
-  seeds.push(edge[(_tnHash(1,1,seed)*edge.length)|0]);
-  while(seeds.length<foreignN){
-    let best=-1,bd=-1;
-    for(let k=0;k<edge.length;k+=2){
-      const i=edge[k], x=i%W, y=(i/W)|0;
-      let dmin=1e9;
-      for(const s of seeds){ const sx=s%W, sy=(s/W)|0;
-        const d=(x-sx)**2+(y-sy)**2; if(d<dmin)dmin=d; }
-      if(dmin>bd){ bd=dmin; best=i; }
-    }
-    if(best<0) break; seeds.push(best);
-  }
-  // 각 외국이 정해진 크기만큼 확장 (본토 육지의 일정 비율)
-  const mainCells=LM.sizes[LM.main];
-  const quota=Math.floor(mainCells*0.085);   // 외국 1개당 본토의 8.5%
-  seeds.forEach((s,k)=>{
-    const q=[s]; own[s]=k; let n=1;
-    while(q.length && n<quota){
-      const c=q.shift();
-      const x=c%W, y=(c/W)|0;
-      for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){
-        if(!dx&&!dy) continue;
-        const nx=x+dx, ny=y+dy;
-        if(nx<0||ny<0||nx>=W||ny>=H) continue;
-        const ni=ny*W+nx;
-        if(elev[ni]<=sea || own[ni]>=0 || LM.lab[ni]!==LM.main) continue;
-        // 산맥을 국경으로 삼는다: 고도가 높으면 확장을 꺼린다
-        if(_tnHash(nx,ny,seed+k*31) < Math.max(0,(elev[ni]-sea))*1.6) continue;
-        own[ni]=k; q.push(ni); n++;
-        if(n>=quota) break;
-      }
-    }
-  });
-  return {own, seeds};
-}
-
 // 지역 분할: 육지 셀에 씨앗을 뿌리고, 지형 비용을 반영해 번져나간다
 // (보로노이의 직선 경계 대신, 산맥·강을 넘기 어렵게 해 자연 경계를 만든다)
 function partitionRegions(T, sea, river, nreg, seed, foreignOwn, LM, islandMin){
   const {elev,W,H}=T;
   const owner=new Int16Array(W*H).fill(-1);
-  const isDomestic=i=> elev[i]>sea && (!foreignOwn || foreignOwn[i]<0);
+  const isDomestic=i=> elev[i]>sea;   // 외국 영토 제거 — 전 국토가 자국
   // 큰 섬은 독립 지역으로 승격, 작은 섬은 본토 최근접 지역에 병합
   const bigIslands=[];
   if(LM && islandMin>0){
@@ -1422,6 +1388,71 @@ function partitionRegions(T, sea, river, nreg, seed, foreignOwn, LM, islandMin){
     seeds.push(best);
   }
 
+  // ── Lloyd 완화: 씨앗을 무게중심으로 옮겨 지역 크기를 고르게 만든다 ──
+  const relax=(iter)=>{
+    for(let it=0; it<iter; it++){
+      const tmpOwn=new Int16Array(W*H).fill(-1);
+      const td=new Float32Array(W*H).fill(Infinity);
+      // 단순 유클리드 배정 (빠른 근사)
+      for(const i of land){
+        const x=i%W, y=(i/W)|0;
+        let best=-1, bd=Infinity;
+        for(let k=0;k<seeds.length;k++){
+          const sx=seeds[k]%W, sy=(seeds[k]/W)|0;
+          const d=(x-sx)**2+(y-sy)**2;
+          if(d<bd){bd=d;best=k;}
+        }
+        tmpOwn[i]=best; td[i]=bd;
+      }
+      // 무게중심으로 이동 (도시화 예상치가 높은 곳은 덜 끌어당겨 작게 유지)
+      const cx=new Float64Array(seeds.length), cy=new Float64Array(seeds.length), cn=new Float64Array(seeds.length);
+      for(const i of land){
+        const k=tmpOwn[i]; if(k<0) continue;
+        cx[k]+=i%W; cy[k]+=(i/W)|0; cn[k]++;
+      }
+      for(let k=0;k<seeds.length;k++){
+        if(!cn[k]) continue;
+        const nx=Math.round(cx[k]/cn[k]), ny=Math.round(cy[k]/cn[k]);
+        const ni=ny*W+nx;
+        if(ni>=0 && ni<W*H && inMain(ni)) seeds[k]=ni;
+      }
+    }
+  };
+  relax(4);
+  // 면적이 지나치게 작은 씨앗은 가장 큰 지역의 변두리로 이주시킨다
+  for(let fix=0; fix<6; fix++){
+    const tmp=new Int16Array(W*H).fill(-1);
+    for(const i of land){
+      const x=i%W, y=(i/W)|0;
+      let best=-1,bd=Infinity;
+      for(let k=0;k<seeds.length;k++){
+        const sx=seeds[k]%W, sy=(seeds[k]/W)|0;
+        const d=(x-sx)**2+(y-sy)**2;
+        if(d<bd){bd=d;best=k;}
+      }
+      tmp[i]=best;
+    }
+    const cn=new Int32Array(seeds.length);
+    for(const i of land) if(tmp[i]>=0) cn[tmp[i]]++;
+    const avg=land.length/seeds.length;
+    let worst=-1, wv=avg*0.42;
+    for(let k=0;k<seeds.length;k++) if(cn[k]<wv){ wv=cn[k]; worst=k; }
+    if(worst<0) break;
+    // 가장 큰 지역에서 중심으로부터 가장 먼 셀로 이주
+    let big=0; for(let k=1;k<seeds.length;k++) if(cn[k]>cn[big]) big=k;
+    let bx=0,by=0,bn=0;
+    for(const i of land) if(tmp[i]===big){ bx+=i%W; by+=(i/W)|0; bn++; }
+    if(!bn) break; bx/=bn; by/=bn;
+    let far=-1, fd=-1;
+    for(const i of land){ if(tmp[i]!==big) continue;
+      const d=(i%W-bx)**2+(((i/W)|0)-by)**2;
+      if(d>fd){fd=d;far=i;} }
+    if(far<0) break;
+    seeds[worst]=far;
+    relax(1);
+  }
+  relax(2);
+
   // 지형 비용 기반 확장 (다익스트라 유사)
   // 진짜 다익스트라: 전역 최소 비용 셀부터 확장해야 씨앗이 고르게 자란다
   const dist=new Float32Array(W*H).fill(Infinity);
@@ -1436,7 +1467,25 @@ function partitionRegions(T, sea, river, nreg, seed, foreignOwn, LM, islandMin){
         if(r<heap.length&&heap[r][0]<heap[m][0])m=r;
         if(m===k)break; [heap[m],heap[k]]=[heap[k],heap[m]]; k=m; } }
     return top; };
-  seeds.forEach((s2,k)=>{ owner[s2]=k; dist[s2]=0; hPush(0,s2); });
+  // 지역별 목표 면적 — 저지대·강가(도시화 예상 높음)는 작게, 산악·오지는 크게
+  const quota=new Float64Array(seeds.length);
+  const cnt=new Float64Array(seeds.length);
+  {
+    let wsum=0; const wgt=new Float64Array(seeds.length);
+    for(let k=0;k<seeds.length;k++){
+      const i=seeds[k];
+      const eRel=Math.max(0, elev[i]-sea);
+      const nearRiver=river[i]?1:0;
+      // 도시화 예상치가 높을수록 가중치를 낮춰 면적을 작게 준다
+      const urbanish = clampT(0.35 + nearRiver*0.45 - eRel*1.8, 0, 1);
+      wgt[k] = 0.55 + (1-urbanish)*1.10;
+      wsum += wgt[k];
+    }
+    for(let k=0;k<seeds.length;k++) quota[k] = land.length * (wgt[k]/wsum);
+  }
+  const runExpand=()=>{
+  owner.fill(-1); dist.fill(Infinity); cnt.fill(0); heap.length=0;
+  seeds.forEach((s2,k)=>{ owner[s2]=k; dist[s2]=0; cnt[k]=1; hPush(0,s2); });
   while(heap.length){
     const [c,cur]=hPop();
     if(c>dist[cur]) continue;
@@ -1447,14 +1496,40 @@ function partitionRegions(T, sea, river, nreg, seed, foreignOwn, LM, islandMin){
       if(nx<0||ny<0||nx>=W||ny>=H) continue;
       const ni=ny*W+nx;
       if(!inMain(ni)) continue;
-      const slope=Math.abs(elev[ni]-elev[cur])*9;
-      const cross=river[ni]?0.9:0;
-      const rough=Math.max(0, elev[ni]-sea)*0.6;
-      const cost=1 + slope + cross + rough + _tnHash(nx,ny,seed+77)*0.35;
+      const k=owner[cur];
+      const slope=Math.abs(elev[ni]-elev[cur])*4.5;
+      const cross=river[ni]?0.55:0;
+      const rough=Math.max(0, elev[ni]-sea)*0.35;
+      // 면적 할당량: 목표를 넘길수록 확장 비용이 급증한다 (크기 균등화)
+      const over=Math.max(0, cnt[k]/quota[k]-1);
+      const greed=over*over*22.0;
+      const cost=1 + slope + cross + rough + greed + _tnHash(nx,ny,seed+77)*0.30;
       const nd=c+cost;
-      if(nd<dist[ni]){ dist[ni]=nd; owner[ni]=owner[cur]; hPush(nd,ni); }
+      if(nd<dist[ni]){ dist[ni]=nd; if(owner[ni]>=0) cnt[owner[ni]]--; owner[ni]=k; cnt[k]++; hPush(nd,ni); }
     }
   }
+  };
+  runExpand();
+  // 실제 확장 결과로 반복 보정: 굶주린 씨앗을 비대한 지역의 변두리로 옮긴다
+  for(let fix=0; fix<8; fix++){
+    const avg=land.length/seeds.length;
+    let worst=-1, wv=avg*0.45;
+    for(let k=0;k<seeds.length;k++) if(cnt[k]<wv){ wv=cnt[k]; worst=k; }
+    if(worst<0) break;
+    let big=0; for(let k=1;k<seeds.length;k++) if(cnt[k]>cnt[big]) big=k;
+    if(cnt[big] < avg*1.3) break;
+    let bx=0,by=0,bn=0;
+    for(let i=0;i<owner.length;i++) if(owner[i]===big){ bx+=i%W; by+=(i/W)|0; bn++; }
+    if(!bn) break; bx/=bn; by/=bn;
+    let far=-1, fd=-1;
+    for(let i=0;i<owner.length;i++){ if(owner[i]!==big) continue;
+      const d=(i%W-bx)**2+(((i/W)|0)-by)**2;
+      if(d>fd){fd=d;far=i;} }
+    if(far<0) break;
+    seeds[worst]=far;
+    runExpand();
+  }
+
   // 본토에서 떨어져 나간 국내 잔여 조각 → 최근접 지역에 병합
   for(let k=0;k<dsz.length;k++){
     if(k===mainComp) continue;
@@ -1515,35 +1590,106 @@ function partitionRegions(T, sea, river, nreg, seed, foreignOwn, LM, islandMin){
       for(let q=0;q<take;q++) owner[cells[q]]=k;
     }
   }
-  // ── 섬 처리 ──
+  // ── 섬 제거: 본토 이외의 작은 육지 덩어리는 전부 바다로 되돌린다 ──
+  //     (섬을 지도에 남기고 가까운 지역에 억지로 편입시키면 화면에 뾰족한
+  //      파편·비현실적 연결이 생긴다. 본토 하나로만 통일하는 편이 안전하다.)
   if(LM){
-    // 큰 섬: 독립 지역으로 승격
-    let nextId=nMain;
-    for(let bi=0; bi<nIsland; bi++){
-      const k=bigIslands[bi];
-      for(let i=0;i<elev.length;i++)
-        if(LM.lab[i]===k && isDomestic(i)) owner[i]=nextId;
-      nextId++;
-    }
-    // 작은 섬: 본토 최근접 지역에 병합
-    for(let k=0;k<LM.count;k++){
-      if(k===LM.main || bigIslands.slice(0,nIsland).includes(k)) continue;
-      // 섬 중심
-      let cx=0, cy=0, n=0;
-      for(let i=0;i<elev.length;i++) if(LM.lab[i]===k && isDomestic(i)){ cx+=i%W; cy+=(i/W)|0; n++; }
-      if(!n) continue;
-      cx/=n; cy/=n;
-      // 가장 가까운 본토 지역
-      let best=-1, bd=1e18;
-      for(let i=0;i<elev.length;i++){
-        if(owner[i]<0 || owner[i]>=nMain) continue;
-        const d=(i%W-cx)**2 + (((i/W)|0)-cy)**2;
-        if(d<bd){ bd=d; best=owner[i]; }
-      }
-      if(best>=0) for(let i=0;i<elev.length;i++) if(LM.lab[i]===k && isDomestic(i)) owner[i]=best;
+    for(let i=0;i<elev.length;i++){
+      if(LM.lab[i]>=0 && LM.lab[i]!==LM.main) elev[i] = sea - 0.05;  // 섬을 바다 밑으로
     }
   }
-  return {owner, seeds, nMain, nIsland};
+  // ── 주인 없는 육지 제거: 대륙에 구멍이 남지 않게 전부 흡수한다 ──
+  for(let pass=0; pass<40; pass++){
+    let left=0, changed=0;
+    for(let i=0;i<elev.length;i++){
+      if(elev[i]<=sea || owner[i]>=0) continue;
+      if(foreignOwn && foreignOwn[i]>=0) continue;    // 외국 땅은 그대로
+      left++;
+      const x=i%W, y=(i/W)|0;
+      // 인접한 국내 지역 중 가장 많이 접한 곳으로
+      const tally=new Map();
+      for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){
+        const nx=x+dx, ny=y+dy;
+        if(nx<0||ny<0||nx>=W||ny>=H) continue;
+        const o=owner[ny*W+nx];
+        if(o>=0) tally.set(o,(tally.get(o)||0)+1);
+      }
+      if(!tally.size) continue;
+      let best=-1,bv=0;
+      for(const [k,v] of tally) if(v>bv){bv=v;best=k;}
+      owner[i]=best; changed++;
+    }
+    if(!left || !changed) break;
+  }
+  // 그래도 남으면(고립 조각) 외국 영토로 편입해 빈틈을 없앤다
+  if(foreignOwn){
+    for(let i=0;i<elev.length;i++){
+      if(elev[i]<=sea || owner[i]>=0 || foreignOwn[i]>=0) continue;
+      const x=i%W, y=(i/W)|0;
+      let best=-1,bd=1e18;
+      for(let j=0;j<elev.length;j++){
+        if(foreignOwn[j]<0) continue;
+        const d=(j%W-x)**2+(((j/W)|0)-y)**2;
+        if(d<bd){bd=d;best=foreignOwn[j];}
+      }
+      if(best>=0) foreignOwn[i]=best;
+    }
+  }
+  // ── 지역 연속성 보장 (단순하고 확실한 방식) ──
+  // 1) 각 지역의 최대 연결 조각만 남기고 나머지는 -2(무주지)로 비운다.
+  // 2) -2 셀을 단순 BFS로 채운다: 매 스텝 -2에 인접한 정식 영역이 있으면 그 색으로 칠하고,
+  //    다음 스텝에 그 칸도 "정식"으로 취급해 계속 번진다. 이러면 항상 연결된 형태로 채워진다.
+  {
+    for(let k=0;k<nMain;k++){
+      const seen=new Uint8Array(W*H); const comps=[];
+      for(let i=0;i<owner.length;i++){
+        if(owner[i]!==k||seen[i]) continue;
+        const cells=[i]; seen[i]=1; const q=[i];
+        while(q.length){ const c=q.pop(); const x=c%W,y=(c/W)|0;
+          for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){
+            const nx=x+dx,ny=y+dy;
+            if(nx<0||ny<0||nx>=W||ny>=H) continue;
+            const ni=ny*W+nx;
+            if(owner[ni]!==k||seen[ni]) continue;
+            seen[ni]=1; cells.push(ni); q.push(ni); } }
+        comps.push(cells);
+      }
+      if(!comps.length) continue;
+      comps.sort((a,b)=>b.length-a.length);
+      for(let c=1;c<comps.length;c++) for(const i of comps[c]) owner[i]=-2;
+    }
+    // 단순 확산: -2 셀 중 정식 영역과 맞닿은 것부터 순서대로 채운다.
+    // 매 반복마다 "지금 확정된 정식 영역"에 인접한 -2를 찾아 칠하고, 그 칸도 즉시 정식이 된다.
+    let guard=0;
+    while(guard++<W*H){
+      let changed=false;
+      for(let i=0;i<owner.length;i++){
+        if(owner[i]!==-2) continue;
+        const x=i%W, y=(i/W)|0;
+        for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){
+          const nx=x+dx, ny=y+dy;
+          if(nx<0||ny<0||nx>=W||ny>=H) continue;
+          const o=owner[ny*W+nx];
+          if(o>=0 && o<nMain){ owner[i]=o; changed=true; break; }
+        }
+      }
+      if(!changed) break;
+    }
+    // 완전히 고립된 나머지(사방이 바다이거나 다른 -2뿐)는 최근접 정식 영역으로
+    for(let i=0;i<owner.length;i++){
+      if(owner[i]!==-2) continue;
+      const x=i%W, y=(i/W)|0;
+      let best=-1, bd=1e18;
+      for(let j=0;j<owner.length;j++){
+        if(owner[j]<0 || owner[j]>=nMain) continue;
+        const d=(j%W-x)**2 + (((j/W)|0)-y)**2;
+        if(d<bd){ bd=d; best=owner[j]; }
+      }
+      if(best>=0) owner[i]=best;
+    }
+  }
+
+    return {owner, seeds, nMain, nIsland};
 }
 
 // 지역별 지형 통계 → 특성 도출
@@ -1711,75 +1857,108 @@ function extractBorders(owner, nreg, W, H){
     }
     if(!loops.length){ paths.push(''); continue; }
     loops.sort((a,b)=>b.length-a.length);
-    const pts=loops[0].map(s=>{
+    const subPaths=[];
+    for(const loop of loops){
+    const pts=loop.map(s=>{
       const [gx,gy]=s.split(',').map(Number);
       return [ +(gx*sx).toFixed(1), +(gy*sy).toFixed(1) ];
     });
     // 경로 단순화 (인접 중복 제거)
-    const simp=[];
+    let simp=[];
     for(const p of pts){
       const last=simp[simp.length-1];
       if(!last || Math.abs(last[0]-p[0])>0.6 || Math.abs(last[1]-p[1])>0.6) simp.push(p);
     }
-    paths.push(simp.map((p,i)=>(i?'L':'M')+p[0]+' '+p[1]).join(' ')+' Z');
+    // 격자 계단 제거: Chaikin 코너 컷 2회 → 부드러운 폐곡선
+    const chaikin=(poly)=>{
+      if(poly.length<4) return poly;
+      const out=[];
+      for(let i=0;i<poly.length;i++){
+        const a=poly[i], b=poly[(i+1)%poly.length];
+        out.push([a[0]*0.75+b[0]*0.25, a[1]*0.75+b[1]*0.25]);
+        out.push([a[0]*0.25+b[0]*0.75, a[1]*0.25+b[1]*0.75]);
+      }
+      return out;
+    };
+    simp=chaikin(chaikin(simp));
+    // 과밀 정점 솎아내기
+    // 거의 일직선인 정점은 버린다 (Douglas-Peucker 근사)
+    const thin=[];
+    for(let i=0;i<simp.length;i++){
+      const last=thin[thin.length-1];
+      if(!last){ thin.push(simp[i]); continue; }
+      const d2=(last[0]-simp[i][0])**2+(last[1]-simp[i][1])**2;
+      if(d2 < 5.5) continue;                       // 너무 촘촘하면 skip
+      if(thin.length>=2){
+        const a=thin[thin.length-2], b=last, c2=simp[i];
+        // 세 점이 이루는 삼각형 면적이 작으면 b는 불필요
+        const area=Math.abs((b[0]-a[0])*(c2[1]-a[1])-(c2[0]-a[0])*(b[1]-a[1]))/2;
+        if(area<1.1){ thin[thin.length-1]=c2; continue; }
+      }
+      thin.push(simp[i]);
+    }
+    subPaths.push(thin.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ')+' Z');
+    }
+    paths.push(subPaths.join(' '));
   }
   return paths;
 }
 
 // 해안선(바다 영역) 경로
 function seaPath(T, sea){
+  // 바다는 배경으로 처리하고, 여기서는 해안선만 반환한다
   const {elev,W,H}=T;
   const sx=TERRAIN.VIEW_W/W, sy=TERRAIN.VIEW_H/H;
   let d='';
-  for(let y=0;y<H;y++){
-    let run=-1;
-    for(let x=0;x<=W;x++){
-      const isSea = x<W && elev[y*W+x]<=sea;
-      if(isSea && run<0) run=x;
-      if(!isSea && run>=0){
-        d += `M${(run*sx).toFixed(1)} ${(y*sy).toFixed(1)}h${((x-run)*sx).toFixed(1)}v${sy.toFixed(1)}h-${((x-run)*sx).toFixed(1)}Z`;
-        run=-1;
-      }
-    }
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+    const i=y*W+x;
+    if(elev[i]<=sea) continue;
+    // 육지 셀 중 바다와 접한 변만 그린다
+    const up   = y>0   ? elev[i-W]<=sea : true;
+    const down = y<H-1 ? elev[i+W]<=sea : true;
+    const lf   = x>0   ? elev[i-1]<=sea : true;
+    const rt   = x<W-1 ? elev[i+1]<=sea : true;
+    const X=x*sx, Y=y*sy;
+    if(up)   d+=`M${X.toFixed(1)} ${Y.toFixed(1)}h${sx.toFixed(1)}`;
+    if(down) d+=`M${X.toFixed(1)} ${(Y+sy).toFixed(1)}h${sx.toFixed(1)}`;
+    if(lf)   d+=`M${X.toFixed(1)} ${Y.toFixed(1)}v${sy.toFixed(1)}`;
+    if(rt)   d+=`M${(X+sx).toFixed(1)} ${Y.toFixed(1)}v${sy.toFixed(1)}`;
   }
   return d;
 }
 
 // 전체 생성 파이프라인
 function buildWorld(nreg, seed, landRatio, opts){
-  const O = opts||{};
-  const foreignN = (O.foreignN!=null)? O.foreignN : 3;
   const T=generateTerrain(seed);
   const sea=findSeaLevel(T.elev, landRatio||0.62);
-  const river=traceRivers(T, sea, Math.max(3, Math.round(nreg*0.7)));
+  const RV=traceRivers(T, sea, Math.max(4, Math.round(nreg*0.8)));
+  const river=RV.river;
   const LM=labelLandmasses(T, sea);
-  const FA=assignForeign(T, sea, LM, foreignN, seed);
   // 섬 승격 기준: 본토의 3.5% 이상이면 독립 지역
   const islandMin=Math.max(24, Math.floor(LM.sizes[LM.main]*0.035));
-  const {owner, seeds, nMain, nIsland}=partitionRegions(T, sea, river, nreg, seed, FA.own, LM, islandMin);
+  const {owner, seeds, nMain, nIsland}=partitionRegions(T, sea, river, nreg, seed, null, LM, islandMin);
   const {traits, capital}=deriveRegionTraits(T, sea, river, owner, seeds, nreg);
   const names=nameRegions(traits, T.W, T.H);
   const paths=extractBorders(owner, nreg, T.W, T.H);
   const seaD=seaPath(T, sea);
-  // 외국 영토 경로
-  const foreignPaths=[];
-  if(foreignN>0){
-    const fo=new Int16Array(FA.own.length);
-    for(let i=0;i<FA.own.length;i++) fo[i]=FA.own[i];
-    const fp=extractBorders(fo, foreignN, T.W, T.H);
-    for(const d of fp) foreignPaths.push(d);
-  }
-  // 강 경로 (표시용)
+  // 강 경로 (표시용): 연속 폴리라인 + Chaikin 스무딩
   const sx=TERRAIN.VIEW_W/T.W, sy=TERRAIN.VIEW_H/T.H;
   let riverD='';
-  for(let i=0;i<river.length;i++){
-    if(!river[i] || T.elev[i]<=sea) continue;
-    const x=(i%T.W)*sx, y=((i/T.W)|0)*sy;
-    riverD += `M${x.toFixed(1)} ${y.toFixed(1)}h${(sx*1.1).toFixed(1)}`;
+  for(const path of RV.tracks){
+    let pts=path.map(i=>[ (i%T.W+0.5)*sx, (((i/T.W)|0)+0.5)*sy ]);
+    if(pts.length>2){
+      const out=[pts[0]];
+      for(let i=0;i<pts.length-1;i++){
+        const a=pts[i], b=pts[i+1];
+        out.push([a[0]*0.7+b[0]*0.3, a[1]*0.7+b[1]*0.3]);
+        out.push([a[0]*0.3+b[0]*0.7, a[1]*0.3+b[1]*0.7]);
+      }
+      out.push(pts[pts.length-1]); pts=out;
+    }
+    riverD += pts.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ')+' ';
   }
   return { nreg, seed, sea, traits, names, paths, seaD, riverD, capital, T, owner,
-           foreignPaths, foreignOwn:FA.own, foreignN, nMain, nIsland,
-           islands:(nIsland||0) };
+           nMain, nIsland, islands:(nIsland||0) };
 }
 class Sim {
   constructor(){
@@ -1868,6 +2047,7 @@ class Sim {
     this.intlOrg = null;           // 국제기구 가입 상태
     this.warOn = true;             // 대외 전쟁 허용
     this.war = null;               // 진행 중 전쟁
+    this.demIndex = 70;            // 민주주의 지수 (stepDerived에서 갱신)
     this.cabinet = [];             // 내각 부처 배분
     this.mpOn = true;              // 의원 개체 시스템
     this.mps = [];                 // 의원 명부
@@ -6575,22 +6755,8 @@ class Sim {
   }
   // 지역별 접경 외국 계산 (지형 생성 시 1회)
   computeBorders(){
+    // 인접국 영토를 지도에서 제거했으므로 접경 지역 개념은 더 이상 없다.
     this.regionBorder = new Array(NREG).fill(null).map(()=>[]);
-    if(typeof WORLD==='undefined' || !WORLD || !WORLD.foreignOwn) return;
-    const {T, owner, foreignOwn}=WORLD;
-    const W=T.W, H=T.H;
-    const seen=new Set();
-    for(let i=0;i<owner.length;i++){
-      const r=owner[i]; if(r<0||r>=NREG) continue;
-      const x=i%W, y=(i/W)|0;
-      for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){
-        const nx=x+dx, ny=y+dy;
-        if(nx<0||ny<0||nx>=W||ny>=H) continue;
-        const f=foreignOwn[ny*W+nx];
-        if(f>=0){ const k=r+':'+f;
-          if(!seen.has(k)){ seen.add(k); this.regionBorder[r].push(f); } }
-      }
-    }
   }
   stepForeign(){
     if(this.tick%3!==0) return;
@@ -6637,21 +6803,10 @@ class Sim {
     // ── 국내 정치 효과 ──
     // 안보 위협 → 결집 효과(rally around the flag)
     if(threat>0.2){
-      if(!this.regionBorder) this.computeBorders();
-      // 접경 지역은 위협을 더 강하게 체감한다
-      const regThreat=new Float32Array(NREG);
-      for(let r=0;r<NREG;r++){
-        let t=0;
-        for(const fi of (this.regionBorder&&this.regionBorder[r])||[]){
-          const f=this.foreign[fi];
-          if(f && f.rel<-0.2) t += (-f.rel)*f.power;
-        }
-        regThreat[r]=t;
-      }
+      // 전국 균일 결집 효과 (접경 지역 개념은 제거됨 — 인접국 영토가 지도에 없다)
       for(let i=0;i<N;i+=3){
-        const extra = regThreat[this.region[i]]*0.0022;
-        this.fear[i]=clamp(this.fear[i]+threat*0.0018+extra);
-        this.tribalism[i]=clamp(this.tribalism[i]+threat*0.0012+extra*0.7);
+        this.fear[i]=clamp(this.fear[i]+threat*0.0018);
+        this.tribalism[i]=clamp(this.tribalism[i]+threat*0.0012);
       }
       if(lead) lead.support=clamp(lead.support*(1+threat*0.0016),0,1);
     }
@@ -7509,9 +7664,9 @@ const UI={
       ['GDP 지수',S.economy.toFixed(0),d(H.gdp,0)],
       ['실업률',S.unemployment.toFixed(1)+'%',d(H.unemp)],
       ['물가상승률',S.inflation.toFixed(1)+'%',d(H.infl)],
-      ['민주주의 지수',s.demIndex.toFixed(0),d(H.dem,0)],
+      ['민주주의 지수',(s.demIndex??70).toFixed(0),d(H.dem,0)],
       ['양극화',S.polarization.toFixed(0),d(H.polz,0)],
-      ['안정성',S.stability.toFixed(0),'<span class="nt">군부 '+s.milInfluence.toFixed(0)+'</span>'],
+      ['안정성',(S.stability??0).toFixed(0),'<span class="nt">군부 '+(s.milInfluence??0).toFixed(0)+'</span>'],
     ];
     $('#kpis').innerHTML=items.map(([l,v,dd])=>
       `<div class="kpi"><div class="l">${l}</div><div class="v">${v}</div><div class="d">${dd} <span class="nt">/1y</span></div></div>`).join('');
@@ -9814,30 +9969,18 @@ const UI={
     // 바다 배경 + 섬 분리선 느낌
     html+=`<defs><filter id="seaGlow"><feGaussianBlur stdDeviation="2"/></filter></defs>`;
     this.mapRegions=[];
+    if(typeof WORLD==='undefined' || !WORLD || !WORLD.paths || WORLD.paths.length!==NREG){
+      // 지형이 아직 없으면 기본 시드로 생성한다 (구버전 수제 지도는 사용하지 않는다)
+      try { applyGeneratedWorld(NREG, 20260806, 0.58); } catch(e){}
+    }
     if(typeof WORLD!=='undefined' && WORLD && WORLD.paths && WORLD.paths.length===NREG){
       // ── 지형 기반 생성 지도 ──
       this._regShapes=null;
-      if(WORLD.seaD) html+=`<path d="${WORLD.seaD}" fill="rgba(30,58,110,0.30)" stroke="none"/>`;
+      html+=`<rect x="0" y="0" width="${TERRAIN.VIEW_W}" height="${TERRAIN.VIEW_H}" fill="rgba(22,44,84,0.42)"/>`;
+      if(WORLD.seaD) html+=`<path d="${WORLD.seaD}" fill="none" stroke="rgba(120,190,255,0.30)" stroke-width="0.9" pointer-events="none"/>`;
       for(let id=0;id<NREG;id++){
         const d=WORLD.paths[id]; if(!d) continue;
         html+=`<path class="region" id="reg${id}" d="${d}"><title></title></path>`;
-      }
-      // 인접국 영토
-      if(WORLD.foreignPaths && WORLD.foreignPaths.length){
-        const FN=(this.sim.foreign&&this.sim.foreign.length)? this.sim.foreign : [];
-        WORLD.foreignPaths.forEach((d,fi)=>{
-          if(!d) return;
-          const f=FN[fi];
-          const rel=f? f.rel : 0;
-          const col = rel>0.5? 'rgba(90,224,180,0.20)' : rel<-0.4? 'rgba(255,98,98,0.22)' : 'rgba(140,160,200,0.16)';
-          const stk = rel>0.5? 'rgba(90,224,180,0.55)' : rel<-0.4? 'rgba(255,98,98,0.6)' : 'rgba(140,160,200,0.45)';
-          html+=`<path d="${d}" fill="${col}" stroke="${stk}" stroke-width="1" stroke-dasharray="3 2" pointer-events="none"/>`;
-          if(f){
-            const bb=WORLD.foreignPaths[fi];
-            const m=/M([\d.]+) ([\d.]+)/.exec(bb);
-            if(m) html+=`<text x="${m[1]}" y="${m[2]}" fill="${stk}" font-size="7.5" font-family="var(--mono)" pointer-events="none" style="text-shadow:0 0 3px #000">${f.name}</text>`;
-          }
-        });
       }
       if(WORLD.riverD) html+=`<path d="${WORLD.riverD}" fill="none" stroke="rgba(90,180,255,0.42)" stroke-width="1.1" pointer-events="none"/>`;
       const sx=TERRAIN.VIEW_W/WORLD.T.W, sy=TERRAIN.VIEW_H/WORLD.T.H;
@@ -10216,6 +10359,10 @@ window.addEventListener('DOMContentLoaded',()=>{
     const top=REGION_TRAITS.map((t,i)=>({i,p:t.popW/tot*100})).sort((a,b)=>b.p-a.p)[0];
     info.textContent=`최대 지역: ${REGION_NAMES[top.i]} 인구 ${top.p.toFixed(1)}% · 부 ${REGION_TRAITS[top.i].wealth.toFixed(2)}`;
   };
+  const advT=document.getElementById('introAdvToggle'), advB=document.getElementById('introAdv');
+  if(advT) advT.onclick=()=>{ const open=advB.style.display!=='none';
+    advB.style.display=open?'none':'block';
+    advT.textContent=(open?'▸':'▾')+' 국토 설정 (선택)'; };
   const terrBox=document.getElementById('introTerrain');
   let tnSeed=(Math.random()*1e9)|0;
   const drawPreview=()=>{
@@ -10227,7 +10374,8 @@ window.addEventListener('DOMContentLoaded',()=>{
                '#e0d24d','#4dd0c0','#c98cff','#ff8ab0','#8ae06a','#ffb24d','#6ac4ff','#d4a5ff',
                '#a0e05a','#ff7a9c','#5ac8e0','#ffd24d'];
     let h='';
-    if(w.seaD) h+=`<path d="${w.seaD}" fill="rgba(30,58,110,0.35)"/>`;
+    h+=`<rect x="0" y="0" width="${TERRAIN.VIEW_W}" height="${TERRAIN.VIEW_H}" fill="rgba(22,44,84,0.45)"/>`;
+    if(w.seaD) h+=`<path d="${w.seaD}" fill="none" stroke="rgba(120,190,255,0.32)" stroke-width="0.9"/>`;
     w.paths.forEach((d,i)=>{ if(d) h+=`<path d="${d}" fill="${PAL[i%PAL.length]}" fill-opacity="0.55" stroke="rgba(10,16,32,0.75)" stroke-width="0.8"/>`; });
     if(w.riverD) h+=`<path d="${w.riverD}" fill="none" stroke="rgba(90,180,255,0.5)" stroke-width="1.2"/>`;
     const sx=TERRAIN.VIEW_W/w.T.W, sy=TERRAIN.VIEW_H/w.T.H;
@@ -10262,7 +10410,9 @@ window.addEventListener('DOMContentLoaded',()=>{
   if(agree) agree.onclick=()=>{
     if(ov)ov.style.display='none';
     UI.sim=new Sim();          // 지역 설정을 반영해 새로 생성
-    UI._parlKey=''; UI.paused=false; UI.render(true);
+    UI._parlKey=''; UI._regShapes=null;
+    UI.buildMap();             // 생성된 국토로 지도를 다시 그린다
+    UI.paused=false; UI.render(true);
   };
 });
 </script>
