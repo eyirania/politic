@@ -5118,14 +5118,20 @@ class Sim {
       let score = align + (inGov?0.55:0) + (inCS?0.20:0) - (inGov||inCS?0:0.05);
       // 선거 임박 시 인기 없는 법안엔 이탈
       if(elecNear) score -= Math.abs(align)<0.25?0.25:0;
-      // 계파 갈등이 크면 이탈표 — 어느 계파가 이탈했는지 기록
+      let v = score>0.18? 'yes' : score<-0.18? 'no' : 'abst';
+      // 계파 갈등이 크면 이탈표 — 계파 입장이 "정당의 최종 표결(v)"과 반대일 때만 이탈로 본다
+      // (쟁점 원래 방향(dir)이 아니라 v와 비교해야 한다 — 정당이 연립규율 등으로
+      //  자기 계파 다수 성향과 다르게 투표할 때도 이탈 판정이 뒤집히지 않는다)
       let defect=0; let oppFacs=[];
       const facRows=[];
       if(this.factionsOn && p.factions && p.factions.length>=2){
-        oppFacs=p.factions.filter(f=>{ const fs=clamp((f.cent[it.axis]||0)*1.6,-1,1); return fs*dir<0; });
+        const vSign = v==='yes'? 1 : v==='no'? -1 : 0;
+        oppFacs = vSign===0? [] : p.factions.filter(f=>{
+          const fs=clamp((f.cent[it.axis]||0)*1.6,-1,1)*dir;   // 계파의 쟁점 성향(부호)
+          return fs*vSign<0;                                    // 정당 표결과 반대 부호일 때만 이탈
+        });
         defect = oppFacs.reduce((a,f)=>a+f.share,0);
       }
-      let v = score>0.18? 'yes' : score<-0.18? 'no' : 'abst';
       // 이탈표 반영: 의석 일부가 반대편으로
       const dSeats = Math.round(p.seats*clamp(defect*0.6,0,0.45));
       const mainSeats = p.seats - dSeats;
