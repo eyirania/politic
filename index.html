@@ -1349,8 +1349,9 @@ function partitionRegions(T, sea, river, nreg, seed, foreignOwn, LM, islandMin){
       if(LM.sizes[k]>=islandMin) bigIslands.push(k);
     }
   }
-  const nIsland=Math.min(bigIslands.length, Math.max(0, nreg-2));
-  const nMain=nreg-nIsland;
+  // 섬은 바다로 되돌려 제거하므로 승격할 섬이 없다 — 전 지역을 본토에 배정한다.
+  const nIsland=0;
+  const nMain=nreg;
   // 외국 영토가 국내 육지를 조각낼 수 있다 → 최대 연결 조각만 본토로 쓴다
   const dcomp=new Int16Array(W*H).fill(-1);
   const dsz=[];
@@ -1716,7 +1717,38 @@ function partitionRegions(T, sea, river, nreg, seed, foreignOwn, LM, islandMin){
     }
   }
 
-    return {owner, seeds, nMain, nIsland};
+    // ── 최종 보정: 셀이 하나도 없는 지역이 남았으면 가장 큰 지역을 쪼개 되살린다 ──
+  //    (연속성 정리·흡수 과정에서 지역이 통째로 사라질 수 있다)
+  for(let pass=0; pass<nMain; pass++){
+    const cnt=new Int32Array(nMain);
+    for(let i=0;i<owner.length;i++){ const o=owner[i]; if(o>=0&&o<nMain) cnt[o]++; }
+    let empty=-1; for(let k=0;k<nMain;k++) if(cnt[k]===0){ empty=k; break; }
+    if(empty<0) break;
+    let big=0; for(let k=1;k<nMain;k++) if(cnt[k]>cnt[big]) big=k;
+    if(cnt[big]<8) break;
+    // big의 중심에서 가장 먼 절반을 떼어 빈 지역에 준다 (연결성 유지를 위해 BFS로)
+    const cells=[]; for(let i=0;i<owner.length;i++) if(owner[i]===big) cells.push(i);
+    let cx=0,cy=0; for(const i of cells){ cx+=i%W; cy+=(i/W)|0; } cx/=cells.length; cy/=cells.length;
+    let far=-1, fd=-1;
+    for(const i of cells){ const d=(i%W-cx)**2+(((i/W)|0)-cy)**2; if(d>fd){fd=d;far=i;} }
+    if(far<0) break;
+    // far에서 시작해 big 영역 안에서만 절반 크기까지 번져나간다
+    const take=Math.max(4, Math.floor(cells.length*0.45));
+    const seen=new Uint8Array(W*H); const q=[far]; seen[far]=1; let n=0;
+    while(q.length && n<take){
+      const c=q.shift(); owner[c]=empty; n++;
+      const x=c%W, y=(c/W)|0;
+      for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){
+        const nx=x+dx, ny=y+dy;
+        if(nx<0||ny<0||nx>=W||ny>=H) continue;
+        const ni=ny*W+nx;
+        if(owner[ni]!==big||seen[ni]) continue;
+        seen[ni]=1; q.push(ni);
+      }
+    }
+    if(n===0) break;
+  }
+  return {owner, seeds, nMain, nIsland};
 }
 
 // 지역별 지형 통계 → 특성 도출
@@ -10026,8 +10058,16 @@ const UI={
     const s=this.sim;
     $('#regioSl').value=Math.round(s.regionalism*100);
     $('#regioV').textContent=Math.round(s.regionalism*100)+'%';
+    // 지역 수는 6~20으로 가변이므로 슬라이더 상한을 NREG에 맞춘다
+    const cs=$('#regCntSl');
+    if(cs && +cs.max!==NREG){
+      const wasMax = +cs.value >= +cs.max;
+      cs.max=String(NREG);
+      if(wasMax || s.regCount>NREG) s.regCount=NREG;
+    }
+    if(s.regCount>NREG) s.regCount=NREG;
     $('#regCntSl').value=s.regCount;
-    $('#regCntV').textContent=s.regCount+'/12';
+    $('#regCntV').textContent=s.regCount+'/'+NREG;
     // 가장 강한 지역-정당 연고 3개
     const tops=[];
     for(const p of s.parties){ if(!p.regAff)continue;
@@ -10140,7 +10180,8 @@ const UI={
           PRES:'국민이 대통령 직선. 행정수반=국가원수, 여소야대 시 교착',
           SEMI:'대통령(외교·국방)과 총리(내정) 분담. 소속 다르면 동거정부',
           CONSTMON:'세습 군주는 군림하되 통치 안 함. 총리가 실권 (영국·일본·덴마크)',
-          MONARCH:'의회가 국왕을 선출, 재위 후 승하하면 재선출'}[this._draftForm] }</div>
+          MONARCH:'의회가 국왕을 선출, 재위 후 승하하면 재선출',
+          ABSMON:'군주가 실권을 쥐고 통치. 의회는 자문에 그치며, 입헌화 압력이 쌓이면 혁명·흠정헌법으로 이어진다'}[this._draftForm] || '' }</div>
         ${(this._draftForm==='PRES'||this._draftForm==='SEMI')?`<div style="margin-top:12px">
           <div style="font-size:10.5px;color:var(--tx3);margin-bottom:6px">대통령 선출 방식</div>
           <div class="cOpts" id="cPresM">
