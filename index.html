@@ -6059,6 +6059,14 @@ class Sim {
     // 지배 파벌 표시
     p.factions.sort((a,b)=>b.share-a.share);
     p.factions.forEach((f,i)=>{ f.dom = i===0; });
+    // ── 파벌 리더 배정 ── (지속 객체화 때 누락되었던 부분)
+    for(const f of p.factions){
+      if(f.leader && !f.leader.dead && !f.leader.retired) continue;
+      f.leader=this._mkLeader(p, f);
+    }
+    // 당대표는 지배 파벌의 리더
+    const dom=p.factions.find(f=>f.dom)||p.factions[0];
+    if(dom && dom.leader) p.leader=dom.leader;
   }
 
   _seedFactions(p, V, M, mean, want, members){
@@ -6113,6 +6121,20 @@ class Sim {
     return nf;
   }
 
+  _mkLeader(p, f){
+    const yr=this.year();
+    return {
+      lid:(this._polSeq=(this._polSeq||0)+1),
+      name:this._politicianName? this._politicianName() : '무명',
+      born: yr - Math.round(38+rnd()*22),
+      charisma:clamp(0.45+gauss(0,0.18)),
+      integrity:clamp(0.50+gauss(0,0.20)),
+      ambition:clamp(0.50+gauss(0,0.20)),
+      homeReg:(rnd()*NREG)|0,
+      since:yr, office:null, scandalArc:null, dead:false, retired:false,
+      fid: f? f.fid : null, pid:p.id,
+    };
+  }
   _mkFaction(p, cent, share, rad, forceType, n){
     const fid=(this._facSeq=(this._facSeq||0)+1);
     const lr=this.lr(cent);
@@ -6923,11 +6945,24 @@ class Sim {
       ST.distSeats=T;
     } else if(M==='PARALLEL'){
       const dSeats=Math.round(T*clamp(C.districtRatio,0,1)), pSeats=T-dSeats;
-      const nd=dSeats?this.assignDistricts(dSeats):0;
-      const r=this._castVotes(nd,true); votes=r.votes; cast=r.cast;
-      for(let d=0;d<nd;d++){ const arr=[...r.dTally[d].entries()].sort((a,b)=>b[1]-a[1]); noteDist(arr);
-        const p=arr.length&&this.parties.find(q=>q.id===arr[0][0]); if(p){p.seats++;p.dSeats++; ST.dWinByParty[p.id]=(ST.dWinByParty[p.id]||0)+1;}
-        if(arr.length) recAny(d, arr, arr[0][0], 1); }
+      // 축 설정이 중선거구면 지역구를 M인 선거구로 처리한다 (일본 참의원형)
+      const AX=this.readAxes? this.readAxes() : null;
+      const dMag = (AX && AX.distMode==='multi')? Math.max(2, Math.min(9, AX.distMag||C.sntvMag||4)) : 1;
+      const nd = dSeats? this.assignDistricts(Math.max(1, Math.round(dSeats/dMag))) : 0;
+      const r=this._castVotes(nd,dMag===1); votes=r.votes; cast=r.cast;
+      let dPlaced=0;
+      for(let d=0;d<nd && dPlaced<dSeats;d++){
+        const arr=[...r.dTally[d].entries()].map(([id,v])=>[id, dMag>1? v*(1+gauss(0,0.04)) : v]).sort((a,b)=>b[1]-a[1]);
+        noteDist(arr); if(dMag>1) ST.mag=dMag;
+        let firstWin=null;
+        for(let k=0;k<dMag && dPlaced<dSeats;k++){
+          const e=arr[k]; if(!e) break;
+          if(firstWin===null) firstWin=e[0];
+          const p=this.parties.find(q=>q.id===e[0]);
+          if(p){ p.seats++; p.dSeats++; dPlaced++; ST.dWinByParty[p.id]=(ST.dWinByParty[p.id]||0)+1; }
+        }
+        if(firstWin!==null) recAny(d, arr, firstWin, dMag);
+      }
       this.districtResults=DRall;
       const al=this._allocPR(votes,pSeats,cast,3);
       al.forEach((s,id)=>{ const p=this.parties.find(q=>q.id===id); if(p){p.seats+=s;p.pSeats+=s;} });
@@ -6935,12 +6970,22 @@ class Sim {
     } else if(M==='MMP'){
       // 연동형: 비례 득표가 전체 의석 비율 결정, 지역구는 그 안에서 충원
       const dSeats=Math.round(T*clamp(C.districtRatio,0,1));
-      const nd=dSeats?this.assignDistricts(dSeats):0;
+      const AXm=this.readAxes? this.readAxes() : null;
+      const mMag=(AXm && AXm.distMode==='multi')? Math.max(2,Math.min(9,AXm.distMag||4)) : 1;
+      const nd=dSeats? this.assignDistricts(Math.max(1,Math.round(dSeats/mMag))) : 0;
       const r=this._castVotes(nd,false); votes=r.votes; cast=r.cast;
       // 지역구 승자
       const dWin=new Map();
-      for(let d=0;d<nd;d++){ const arr=[...r.dTally[d].entries()].map(([id,v])=>[id,v*(1+gauss(0,0.05))]).sort((a,b)=>b[1]-a[1]); noteDist(arr);
-        if(arr.length){ const id=arr[0][0]; dWin.set(id,(dWin.get(id)||0)+1); ST.dWinByParty[id]=(ST.dWinByParty[id]||0)+1; recAny(d, arr, id, 1); } }
+      let mPlaced=0;
+      for(let d=0;d<nd && mPlaced<dSeats;d++){
+        const arr=[...r.dTally[d].entries()].map(([id,v])=>[id,v*(1+gauss(0,0.05))]).sort((a,b)=>b[1]-a[1]); noteDist(arr);
+        let fw=null;
+        for(let k=0;k<mMag && mPlaced<dSeats;k++){
+          const e=arr[k]; if(!e) break;
+          if(fw===null) fw=e[0];
+          dWin.set(e[0],(dWin.get(e[0])||0)+1); ST.dWinByParty[e[0]]=(ST.dWinByParty[e[0]]||0)+1; mPlaced++;
+        }
+        if(fw!==null){ if(mMag>1) ST.mag=mMag; recAny(d, arr, fw, mMag); } }
       this.districtResults=DRall;
       // 전체 목표 의석 = 비례배분(T석 기준)
       const target=this._allocPR(votes,T,cast,C.threshold);
@@ -7096,8 +7141,21 @@ class Sim {
     }
     const sorted=[...votes.entries()].sort((a,b)=>b[1]-a[1]);
     const vr=sorted.slice(0,2).map(([id])=>this.parties.find(p=>p.id===id)).filter(Boolean);
-    const first=sorted.map(([id,v])=>{const p=this.parties.find(q=>q.id===id);return p?{name:p.name,color:p.color,v:v/Math.max(cast,1)*100}:null;}).filter(Boolean);
-    const topV=sorted.length?sorted[0][1]:0, topPct=topV/Math.max(cast,1)*100;
+    // cast는 지지율 합이라 1보다 작을 수 있다. Math.max(cast,1)로 나누면
+    // 분모가 1로 고정되어 합계가 100%에 못 미친다(스크린샷 46.9% 버그).
+    const castSafe = cast>1e-9? cast : 1;
+    const first=sorted.map(([id,v])=>{const p=this.parties.find(q=>q.id===id); if(!p) return null;
+      const L=p.leader;
+      return {name:p.name, color:p.color, v:v/castSafe*100,
+        cand: L? L.name : null,
+        age: L? (this.year()-L.born) : null,
+        charisma: L? (L.charisma||0.5) : null,
+        integrity: L? (L.integrity||0.5) : null,
+        scandal: !!(L && L.scandalArc),
+        // 인물 효과: 정당 지지 대비 개인 자질이 만든 차이
+        bonus: L? (((L.charisma||0.5)-0.5)*0.34 + ((L.integrity||0.5)-0.5)*0.16 + ((L.scandalArc)? -0.22:0)) : 0};
+    }).filter(Boolean);
+    const topV=sorted.length?sorted[0][1]:0, topPct=topV/castSafe*100;
     const needRunoff = C.presRunoff && vr.length===2 && topPct<50;
     if(!vr.length) return;
     const prev = this.president? this.president.pid : null;
@@ -10506,8 +10564,18 @@ const UI={
     const gp=s.govCoalition.map(id=>s.parties.find(p=>p.id===id)).filter(Boolean);
     const appr=gp.reduce((a,p)=>a+p.support,0)*100;
     const ap=$('#apprPill');
-    ap.textContent= gp.length? `지지율 ${appr.toFixed(0)}%` : '지지율 —';
-    ap.style.color= !gp.length?'var(--tx3)': appr>=45?'#9dff5a': appr>=28?'var(--am)':'#ff5a7a';
+    // '집권당 지지율 합'이 아니라 '국정 수행 평가'를 보여준다.
+    // 둘은 다른 수치다 — 야당 지지자도 정부가 일을 잘한다고 볼 수 있다.
+    const O=(s.opinionOn && s.opinionStatus)? s.opinionStatus() : null;
+    if(O && gp.length){
+      const ga=O.govApproval*100;
+      ap.innerHTML=`국정 <b>${ga.toFixed(0)}%</b><span style="opacity:.55;font-size:10px;margin-left:5px">여당 ${appr.toFixed(0)}%</span>`;
+      ap.style.color= ga>=52?'#9dff5a': ga>=42?'var(--am)':'#ff5a7a';
+      ap.title=`국정 수행 평가 ${ga.toFixed(0)}% · 집권 세력 정당 지지 합 ${appr.toFixed(0)}%`;
+    } else {
+      ap.textContent= gp.length? `지지율 ${appr.toFixed(0)}%` : '지지율 —';
+      ap.style.color= !gp.length?'var(--tx3)': appr>=45?'#9dff5a': appr>=28?'var(--am)':'#ff5a7a';
+    }
 
     const page=document.querySelector('.page.active').id;
     if(page==='page-dash'){ this.renderKPIs(); this.renderHeadline(); this.renderDemoHealth(); this.renderReferendum(); 
@@ -12021,10 +12089,26 @@ const UI={
     const isRunoff = r.mode==='runoff' && r.finalists && r.finalists.length===2;
     const finalNames=new Set((r.finalists||[]).map(f=>f.name));
 
+    // 후보 줄: 정당명 + 인물 + 자질을 한 줄에 담는다
+    const candRow=(f,i)=>{
+      const tags=[];
+      if(f.cand) tags.push(f.cand + (f.age? ` ${f.age}세`:''));
+      if(f.charisma!=null) tags.push(`카리스마 ${(f.charisma*100).toFixed(0)}`);
+      if(f.integrity!=null) tags.push(`청렴 ${(f.integrity*100).toFixed(0)}`);
+      if(f.scandal) tags.push('<span style="color:var(--rd)">스캔들</span>');
+      const bn = f.bonus? (f.bonus>0? `<span style="color:#5ae0b4">인물 +${(f.bonus*100).toFixed(0)}%</span>`
+                                     : `<span style="color:var(--rd)">인물 ${(f.bonus*100).toFixed(0)}%</span>`) : '';
+      return `<div class="prRow" style="align-items:flex-start">
+        <div style="min-width:150px">
+          <b style="color:${f.color}">${i+1}위 ${f.name}${isRunoff&&finalNames.has(f.name)?' ▶결선':''}${!isRunoff&&f.name===pr.winner?' ✓':''}</b>
+          <div style="font-size:9.5px;color:var(--tx3);margin-top:1px">${tags.join(' · ')} ${bn}</div>
+        </div>
+        <div class="prBarW" style="margin-top:4px"><i style="width:${Math.min(100,f.v)}%;background:${f.color}"></i></div>
+        <span style="font-family:var(--mono);min-width:52px;text-align:right;margin-top:3px">${f.v.toFixed(1)}%</span>
+      </div>`;
+    };
     let html=`<div class="prSec">1차 투표 — ${first.length}명 출마${isRunoff?', 상위 2인 결선 진출':' · 단순다수제'}</div>`
-      + first.slice().sort((a,b)=>b.v-a.v).map((f,i)=>
-          bar(`${i+1}위 ${f.name} 후보${isRunoff&&finalNames.has(f.name)?' ▶결선':''}`, f.color, f.v, !isRunoff&&f.name===pr.winner)
-        ).join('');
+      + first.slice().sort((a,b)=>b.v-a.v).map(candRow).join('');
 
     if(isRunoff){
       const tot2=r.finalists.reduce((a,x)=>a+x.votes,0)||1;
@@ -12040,25 +12124,24 @@ const UI={
     const top=[...s.parties].filter(p=>p.id>=0).sort((a,b)=>(b.seats||0)-(a.seats||0))[0];
     const divided = !!(top && P && top.id!==P.id);
     const presSeats = P? (P.seats||0) : 0;
-    html+=`<div class="prSec">정권과 의회</div>
-      <div style="font-size:12px;line-height:1.9;color:var(--tx2)">
+    html+=`<div class="prSec">정권과 의회 · 다음 선거</div>
+      <div style="font-size:11.5px;line-height:1.75;color:var(--tx2)">
         ${pr.turnover
-          ? `<b style="color:var(--am)">정권 교체</b> — ${pr.prevParty? pr.prevParty+'에서 '+pr.winner+'으로':''}`
-          : `<b style="color:#9dff5a">정권 재창출</b>${pr.terms>1?` · ${pr.terms}期 연속`:''}`}<br>
-        대통령 소속당 의석 <b>${presSeats}</b>/${T}석 (${T?(presSeats/T*100).toFixed(1):0}%)<br>
-        ${divided
-          ? `<b style="color:#ff6262">${s.govForm==='SEMI'?'동거정부':'분점정부'}</b> — 의회 다수는 <b>${top?top.name:''}</b>. 대통령과 의회가 다른 정당이라 입법 교착이 예상된다.`
-          : `<b style="color:#9dff5a">단점정부</b> — 대통령과 의회 다수가 같은 정당이라 국정 운영이 순조롭다.`}
+          ? `<b style="color:var(--am)">정권 교체</b>${pr.prevParty? ` (${pr.prevParty} → ${pr.winner})`:''}`
+          : `<b style="color:#9dff5a">정권 재창출</b>${pr.terms>1?` · ${pr.terms}期`:''}`}
+        · 소속당 <b>${presSeats}</b>/${T}석 (${T?(presSeats/T*100).toFixed(0):0}%)
+        · ${divided
+          ? `<b style="color:#ff6262">${s.govForm==='SEMI'?'동거정부':'분점정부'}</b> (의회 다수 ${top?top.name:''})`
+          : `<b style="color:#9dff5a">단점정부</b>`}
       </div>`;
 
     // ── 다음 선거 일정 ──
     const toPres = Math.max(0, s.presInterval - (s.tick - (s.lastPresElection||0)));
     const toGen  = Math.max(0, s.elecInterval - (s.tick - (s.lastElection||0)));
-    html+=`<div class="prSec">다음 선거</div>
-      <div style="font-size:12px;line-height:1.9;color:var(--tx2)">
-        다음 대선 <b>${(toPres/12).toFixed(1)}년</b> 후 · 다음 총선 <b>${(toGen/12).toFixed(1)}년</b> 후<br>
-        ${Math.abs(toPres-toGen)<6? '<span style="color:var(--am)">두 선거가 비슷한 시기에 열려 동시선거 효과가 나타날 수 있다.</span>'
-          : '<span style="color:var(--tx3)">임기가 어긋나 있어 대통령 임기 중 총선이 중간평가가 된다.</span>'}
+    html+=`<div style="font-size:11.5px;line-height:1.75;color:var(--tx2);margin-top:4px">
+        다음 대선 <b>${(toPres/12).toFixed(1)}년</b> · 총선 <b>${(toGen/12).toFixed(1)}년</b> 후 —
+        ${Math.abs(toPres-toGen)<6? '<span style="color:var(--am)">동시선거 효과</span>'
+          : '<span style="color:var(--tx3)">총선이 중간평가가 된다</span>'}
       </div>`;
 
     $('#elViewPres').innerHTML=html;
