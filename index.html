@@ -6096,7 +6096,7 @@ class Sim {
       let n=0,rad=0;
       for(let s=0;s<M;s++)if(assign[s]===c){n++;rad+=this.radical[members[s]];}
       if(n<M*0.05) continue;
-      out.push(this._mkFaction(p, cents[c].slice(), n/M, n?rad/n:p.rad, null, n));
+      out.push(this._mkFaction(p, cents[c].slice(), n/M, n?rad/n:p.rad, null, n, out.map(f=>f.name)));
     }
     if(!out.length) return [this._mkFaction(p, mean.slice(), 1, p.rad, 'est', M)];
     out.sort((a,b)=>b.share-a.share);
@@ -6141,12 +6141,12 @@ class Sim {
       fid: f? f.fid : null, pid:p.id,
     };
   }
-  _mkFaction(p, cent, share, rad, forceType, n){
+  _mkFaction(p, cent, share, rad, forceType, n, extraUsed){
     const fid=(this._facSeq=(this._facSeq||0)+1);
     const lr=this.lr(cent);
     let d=0; for(let c=0;c<6;c++) d+=(cent[c]-p.cent[c])**2; d=Math.sqrt(d);
     const type = forceType || (d<0.45? 'est' : rad>0.55? 'rad' : lr<this.lr(p.cent)? 'ref' : 'pers');
-    const used=new Set((p.factions||[]).map(f=>f.name));
+    const used=new Set([...(p.factions||[]).map(f=>f.name), ...(extraUsed||[])]);
     return {
       fid, name:this._factionName(type, fid, used), type,
       cent:Float64Array.from(cent), share, rad, lr, n:n||0,
@@ -6618,7 +6618,9 @@ class Sim {
     // 지지율이 높을수록 많이 낸다. 다만 정수를 넘지 않고, 계파 수의 제약을 받는다.
     const share=p.support||0;
     // 정당은 표 분산을 두려워한다. 실제 SNTV에서도 정당은 신중하게 공천 수를 정했다.
-    const byShare=Math.max(1, Math.round(share*mag*1.15));
+    // 기대 의석보다 살짝 많이 낸다 — 실제 SNTV 정당도 그렇게 했다.
+    const expect = share*mag;
+    const byShare = Math.max(1, Math.ceil(expect*1.25));
     const byFac=Math.max(1,(p.factions||[]).length);
     return clamp(Math.min(byShare, byFac, mag, 4), 1, 4);
   }
@@ -6638,11 +6640,13 @@ class Sim {
       const n=this.nomineeCount(p, mag);
       const facs=(p.factions||[]).slice().sort((a,b)=>b.share-a.share);
       for(let k=0;k<n;k++){
+        // 계파는 하나씩만 후보를 낸다. 계파 수가 모자라면 신인을 세운다.
         const f=facs[k]||null;
-        const L=f? f.leader : p.leader;
+        const L=(f&&f.leader)? f.leader : (k===0? p.leader : null);
         slate.push({
           pid:p.id, idx:k,
-          name: L? L.name : (p.name+' 후보'+(n>1?(k+1):'')),
+          name: L? L.name : ((this._politicianName? this._politicianName() : p.name+' 후보')+(f?'':'')),
+          rookie: !L,
           fid: f? f.fid : null,
           facName: f? f.name : null,
           color: f? f.color : p.color,
@@ -6667,8 +6671,15 @@ class Sim {
       if(total<=0){ cands.forEach(c=>c.votes=0); continue; }
       if(cands.length===1){ cands[0].votes=total; continue; }
       // 조직력 × 인물 자질로 가중
+      // 정당은 후보 간 표를 고르게 나누려 한다(자민당의 '표 나누기').
+      // 완전히 성공하지는 못하므로 조직력 편차와 무작위 요인이 남는다.
+      const evenW = 1/cands.length;
       let wsum=0;
-      const ws=cands.map(c=>{ const w=c.w*(0.65+c.q*0.7)*(1+gauss(0,0.14)); wsum+=Math.max(0.01,w); return Math.max(0.01,w); });
+      const ws=cands.map(c=>{
+        const own=c.w*(0.65+c.q*0.7);
+        const w=(own*0.45 + evenW*0.55)*(1+gauss(0,0.10));
+        wsum+=Math.max(0.01,w); return Math.max(0.01,w);
+      });
       // 표 조정 실패: 후보 간 편차가 크면 일부가 사표가 된다
       cands.forEach((c,k)=>{ c.votes = total*ws[k]/wsum; });
       // 동사 상잔 기록용
@@ -7044,6 +7055,16 @@ class Sim {
         if(this.nominationMultiEffective && this.nominationMultiEffective()){
           const slate=this.splitPartyVotes(this.buildCandidateSlate(d, mag), pv);
           const res=this.tallyMultiNomination(slate, mag);
+          this._lastSlate=this._lastSlate||[];
+          if(this._lastSlate.length<24){
+            const tot=slate.reduce((a,c)=>a+c.votes,0)||1;
+            this._lastSlate.push({ d, mag,
+              cands: slate.slice().sort((a,b)=>b.votes-a.votes).slice(0,8).map((c,i)=>{
+                const pp=this.parties.find(q=>q.id===c.pid);
+                return { name:c.name, party:pp?pp.name:'?', color:pp?pp.color:'#888',
+                  fac:c.facName||null, pct:c.votes/tot*100, won:i<mag };
+              }) });
+          }
           MN.districts++; if(res.multiParties.length) MN.multi++;
           MN.wiped+=res.wiped.length;
           for(const [pid,n] of res.seatsBy){
@@ -7460,7 +7481,7 @@ class Sim {
     if(this.independents && !this.parties.some(p=>p.id===-2)) this.setIndependents(true);
     // ── 선거 전 전략적 조정 (투표 이전에 일어난다) ──
     // 유권자는 자기 지역 판세를 보고 사표를 피하고, 정당은 후보를 단일화한다.
-    this._lastStrategicMoved=0; this._lastUnifyCount=0; this._castHeads=0;
+    this._lastStrategicMoved=0; this._lastUnifyCount=0; this._castHeads=0; this._lastSlate=[];
     this.stepPreElectionMerge();
     this.stepStrategicVoting();
     const {votes, cast}=this._runLower();
@@ -7575,7 +7596,7 @@ class Sim {
       const rec={
         y:this.year(), sys:C.method, method:C.method, turnout:turnoutPct, gallagher, enpS, enpV:enpS,
         dTotal:this.parties.reduce((a,p)=>a+p.dSeats,0), pTotal:this.parties.reduce((a,p)=>a+p.pSeats,0),
-        total:T, pres:this._presRec||null, multiNom:this._mnStats||null,
+        total:T, pres:this._presRec||null, multiNom:this._mnStats||null, slates:(this._lastSlate||[]).slice(0,6),
         poll:this.lastPoll? this.lastPoll.vals.map(v=>({id:v.id,v:v.v})):null,
         results: this.parties.filter(p=>p.seats>0 || (votes.get(p.id)||0)/Math.max(cast,1)>=0.01)
           .sort((a,b)=>this.lr(a.cent)-this.lr(b.cent))
@@ -12700,13 +12721,36 @@ const UI={
   _multiNomBlock(rec){
     const M=rec&&rec.multiNom; if(!M||!M.districts) return '';
     const pct=v=>(v/M.districts*100).toFixed(0)+'%';
+    // 실제 개표 사례 — 같은 당 후보끼리 표가 어떻게 갈렸는지
+    let sample='';
+    const SL=(rec.slates||[]).find(x=>{
+      const cnt={}; x.cands.forEach(c=>cnt[c.party]=(cnt[c.party]||0)+1);
+      return Object.values(cnt).some(v=>v>1);
+    });
+    if(SL){
+      sample=`<div style="margin-top:10px;padding:9px;border-radius:9px;background:rgba(120,160,255,0.05);border:1px solid rgba(130,170,255,0.14)">
+        <div style="font-size:10px;color:var(--tx3);letter-spacing:1px;margin-bottom:6px">개표 사례 — 선거구 ${SL.d} (정수 ${SL.mag}인)</div>`;
+      for(const c of SL.cands){
+        sample+=`<div style="display:flex;align-items:center;gap:7px;font-size:11px;padding:1.5px 0">
+          <span style="min-width:26px;font-size:9.5px;color:${c.won?'#5ae0b4':'var(--tx3)'}">${c.won?'당선':'낙선'}</span>
+          <span style="width:7px;height:7px;border-radius:50%;background:${c.color}"></span>
+          <span style="min-width:52px;color:var(--tx2)">${c.name}</span>
+          <span style="min-width:78px;font-size:10px;color:var(--tx3)">${c.party}</span>
+          <span style="min-width:52px;font-size:9.5px;color:var(--tx3)">${c.fac||''}</span>
+          <div style="flex:1;height:6px;border-radius:3px;background:rgba(120,140,180,0.12);overflow:hidden;max-width:70px">
+            <div style="width:${Math.min(100,c.pct*3)}%;height:100%;background:${c.color}"></div></div>
+          <span style="font-family:var(--mono);font-size:9.5px;color:var(--tx3);min-width:38px;text-align:right">${c.pct.toFixed(1)}%</span>
+        </div>`;
+      }
+      sample+='</div>';
+    }
     return `<div class="prSec">복수 공천 — 같은 당 후보끼리의 경쟁</div>
       <div style="font-size:11.5px;line-height:1.8;color:var(--tx2)">
         ${M.districts}개 선거구 중 <b>${M.multi}곳</b>(${pct(M.multi)})에서 한 정당이 여러 후보를 냈다.<br>
         <span style="color:var(--am)">동사 상잔 ${M.fights}곳</span> — 마지막 의석을 같은 당 후보끼리 다퉜다.
         ${M.wiped? `<br><span style="color:var(--rd)">표 분산 실패 ${M.wiped}건</span> — 후보를 여럿 냈다가 한 석도 얻지 못했다.` : ''}
         <div style="font-size:10.5px;color:var(--tx3);margin-top:5px">표가 정당이 아니라 후보 개인에게 가므로, 같은 당 안에서 후원회·조직으로 경쟁하게 된다. 이것이 파벌의 구조적 원인이다.</div>
-      </div>`;
+      </div>${sample}`;
   },
   renderFactions(){
     const s=this.sim, host=$('#facBody'); if(!host)return;
