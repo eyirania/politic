@@ -574,6 +574,7 @@ canvas.chart.tall{height:210px}
                 <button class="viewChip" data-st="fac">파벌<span class="stDot" data-dot="fac"></span></button>
                 <button class="viewChip" data-st="opin">여론</button>
                 <button class="viewChip" data-st="amd">개헌<span class="stDot" data-dot="amd"></span></button>
+                <button class="viewChip" data-st="ppl">인물</button>
               </div>
               <div class="chipBar">
                 <span class="lbl">정당 체계:</span>
@@ -2161,6 +2162,7 @@ class Sim {
     this.media = null;
     this.actionOn = true;          // 이익집단 직접행동
     this.actions = []; this.actionCount = 0;
+    this.lifeOn = true;            // 정치인 생애
     this.govApproval = 0.5; this.govEvalAvg = 0;
     this.policyOpinion = []; this.noParty = null;
     this.nextAllyId = 1;
@@ -2801,6 +2803,7 @@ class Sim {
     this.stepImpeachment();
     this.stepMedia();
     this.stepDirectAction();
+    this.stepPoliticianLives();
     this.stepResourceRent();
     if(this.tick-this.lastElection>=this.elecInterval && this.parties.some(p=>p.support>0.04)){
       this.lastElection=this.tick; this.election();
@@ -4154,6 +4157,7 @@ class Sim {
   rebuildMPs(){
     if(!this.mpOn) { this.mps=[]; return; }
     const prev = this.mps || [];
+    const prevSnapshot = prev.slice();
     const byParty = new Map();          // pid -> 기존 의원 목록(재선 후보)
     for(const m of prev){ if(!byParty.has(m.pid)) byParty.set(m.pid,[]); byParty.get(m.pid).push(m); }
     const out=[];
@@ -4168,6 +4172,8 @@ class Sim {
       for(let k=0;k<seats;k++){
         let m = pool.shift();
         if(m && (m.age||45) > (this.tune?this.tune.retireAge:62) + 6) m = null;   // 고령 은퇴
+        // 재기: 낙선했던 인물이 돌아온다
+        if(!m && this.lifeOn && this.pickComeback && rnd()<0.30) m = this.pickComeback(p);
         if(m){
           m.terms = (m.terms||1)+1;
           m.age = (m.age||45) + Math.round(this.con.term||4);
@@ -4202,6 +4208,8 @@ class Sim {
       }
     }
     this.mps = out;
+    // 낙선·재선·신인 기록을 경력에 남긴다
+    if(this.lifeOn && this.recordElectionCareers) this.recordElectionCareers(prevSnapshot);
   }
 
   // 신규 의원 생성 — 정당 좌표에서 개인 편차
@@ -6514,6 +6522,19 @@ class Sim {
        who:'지역·보수', apply:c=>{ if(c.senate==='NONE'){ c.senate='FEDERAL'; c.senSeats=100; c.senTerm=6; } c.senPower=Math.min(1,(c.senPower??0.5)+0.2); }},
       {key:'military',name:'군 권한 헌법화',  desc:'국방 자율성 보장',
        who:'군부',     apply:c=>{}, side:s=>{ s.milInfluence=clamp(s.milInfluence+12,0,100); s.demIndex=clamp((s.demIndex??60)-6,0,100); }},
+      // ── 되돌리는 의제들 ──
+      // 이것이 없으면 헌법이 한 방향으로만 흘러 고착된다.
+      {key:'shorten', name:'임기 단축',       desc:'장기 집권 견제',
+       who:'야권·시민', apply:c=>{ c.term=Math.max(2,(c.term||4)-1); if(c.presTerm) c.presTerm=Math.max(3,c.presTerm-1); }},
+      {key:'relimit', name:'연임 제한 부활',  desc:'권력 집중 차단',
+       who:'야권',     apply:c=>{ c.presLimit=Math.max(1, c.presLimit||0) || 2; }},
+      {key:'unsenate',name:'상원 폐지',       desc:'양원제 비효율 해소',
+       who:'개혁 세력', apply:c=>{ if(c.senPower>0.25) c.senPower=Math.max(0.15,(c.senPower??0.5)-0.25);
+                                  else { c.senate='NONE'; c.senSeats=0; c.senPower=0; } }},
+      {key:'central', name:'중앙집권 회복',   desc:'국가 통합 강화',
+       who:'중앙 정부', apply:c=>{}, side:s=>{ s.federalPower=clamp((s.federalPower??0.5)-0.22,0,1); }},
+      {key:'civilian',name:'문민 통제 강화',  desc:'군의 정치 개입 차단',
+       who:'시민사회', apply:c=>{}, side:s=>{ s.milInfluence=clamp(s.milInfluence-16,0,100); s.demIndex=clamp((s.demIndex??60)+5,0,100); }},
     ];
   }
 
@@ -6551,6 +6572,24 @@ class Sim {
     }
     // 군부: 영향력이 크면 권한 헌법화
     if(this.milInfluence>45) out.push({key:'military', urge:clamp(0.35+(this.milInfluence-45)/50,0.35,1), by:'군부'});
+    // ── 되돌리는 요구 ──
+    // 임기가 길고 국정 지지가 낮으면 단축 요구가 나온다
+    if((C.term||4)>=5 && (this.govApproval??0.5)<0.58)
+      out.push({key:'shorten', urge:clamp(0.42+((C.term||4)-4)*0.12,0.42,1), by:'야권'});
+    // 연임 제한이 없고 대통령이 오래 있으면 부활 요구
+    if((this.govForm==='PRES'||this.govForm==='SEMI') && (C.presLimit||0)===0 && (C.presTerm||0)>0)
+      out.push({key:'relimit', urge:0.40+rnd()*0.25, by:'야권'});
+    // 상원이 입법을 막으면 폐지 요구
+    if(C.senate!=='NONE' && (C.senPower??0)>0.3 && (this.gridlock || S.stability<45))
+      out.push({key:'unsenate', urge:0.32+rnd()*0.25, by:'개혁 세력'});
+    // 지역 갈등이 과하거나 분리 압력이 크면 중앙집권 회복
+    if((this.federalPower??0.5)>0.45){
+      let mx=0; if(this.stateGrievance) for(let r=0;r<NREG;r++) mx=Math.max(mx,this.stateGrievance[r]);
+      if(mx>0.20 || S.stability<50) out.push({key:'central', urge:clamp(0.38+mx,0.38,1), by:'중앙 정부'});
+    }
+    // 민주주의가 회복되면 군을 되돌리려 한다
+    if(this.milInfluence>20 && (this.demIndex??60)>42)
+      out.push({key:'civilian', urge:clamp(0.40+this.milInfluence/120,0.40,1), by:'시민사회'});
     // 지역 대표성: 지역 격차가 크고 상원이 없으면 양원제 요구
     if(C.senate==='NONE' && NREG>=10 && rnd()<0.5)
       out.push({key:'senate', urge:0.32+rnd()*0.2, by:'지역 대표'});
@@ -6680,6 +6719,11 @@ class Sim {
       case 'runoff':  return share<0.3 && sup>0.1? 0.5 : -0.2;
       case 'senate':  return this.lr(p.cent)>0.2? 0.4 : -0.25;
       case 'military':return this.milInfluence>62 && inGov? 0.3 : -0.6;
+      case 'shorten': return inGov? -0.6 : 0.65;         // 야당이 원한다
+      case 'relimit': return inGov? -0.55 : 0.6;
+      case 'unsenate':return share>0.25? 0.35 : -0.2;    // 큰 정당이 원한다(입법 걸림돌 제거)
+      case 'central': return (p.regAff && p.regAff.some(v=>v>0.05))? -0.55 : 0.4;
+      case 'civilian':return this.milInfluence>50? 0.5 : 0.2;
       default: return 0;
     }
   }
@@ -7388,6 +7432,7 @@ class Sim {
       this.pushNews(3, kind==='strike'?'sev2':'norm',
         `<b>${g.name} ${K}</b> — ${(size*100).toFixed(0)}% 규모, 정부에 요구안 제시`);
       this.chron(`${g.name} ${K}`);
+      this.actionCount=(this.actionCount||0)+1;
       break;
     }
   }
@@ -7494,6 +7539,216 @@ class Sim {
       })),
       count:this.actionCount||0,
     };
+  }
+  // ════════ 정치인 생애 ════════
+  // 지금까지 의원 300명은 이름만 있는 숫자였다. 파벌·복수공천·인물론을 다 만들어놓고도
+  // 그 안에 살아가는 개인이 없었다.
+  //
+  // 여기서는 각 의원에게 경력과 서사를 준다.
+  //   지방의원 → 국회의원 → 계파 리더 → 당대표 → 장관 → 총리·대통령
+  // 그리고 낙선·재기·스캔들·세대교체가 그 위에서 일어난다.
+
+  get _careerRank(){
+    return { local:1, mp:2, facLeader:3, partyLeader:4, minister:5, head:6 };
+  }
+  _rankName(k){
+    return {local:'지방의원', mp:'국회의원', facLeader:'계파 수장',
+            partyLeader:'당대표', minister:'장관', head:'국가지도자'}[k]||k;
+  }
+
+  // 의원에게 경력 기록을 붙인다 (없으면 생성)
+  _ensureCareer(m){
+    if(m.career) return m.career;
+    m.career = {
+      born: this.year() - (m.age||45),
+      entered: this.year() - Math.max(0,((m.terms||1)-1)*(this.con.term||4)),
+      peak: 'mp',
+      log: [],                       // {y, what}
+      losses: 0,                     // 낙선 횟수
+      scandals: 0,
+      partyChanges: 0,
+      firstParty: m.pid,
+    };
+    return m.career;
+  }
+
+  _careerNote(m, what, weight){
+    const c=this._ensureCareer(m);
+    c.log.unshift({y:this.year(), what});
+    if(c.log.length>14) c.log.pop();
+    if((weight||0)>=2){
+      this.pushNews(weight>=3?3:2,'norm',`<b>${m.name}</b> — ${what}`);
+      if(weight>=3) this.chron(`${m.name}: ${what}`);
+    }
+  }
+
+  _promote(m, rank){
+    const c=this._ensureCareer(m);
+    const R=this._careerRank;
+    if((R[rank]||0) > (R[c.peak]||0)){
+      c.peak=rank;
+      const yrs=this.year()-c.entered;
+      this._careerNote(m, `${this._rankName(rank)} 취임 (입문 ${yrs}년)`, rank==='head'?3:2);
+    }
+  }
+
+  // ── 매 틱: 경력 갱신 · 세대 교체 · 스캔들 ──
+  stepPoliticianLives(){
+    if(!this.mpOn || !this.lifeOn) return;
+    if(this.tick%12!==0) return;
+    const mps=this.mps||[];
+    if(!mps.length) return;
+
+    // 계파 리더·당대표는 별도 객체다. 의원 명부에 같은 이름이 없으면
+    // 그 정당의 의원 중 하나를 그 인물로 삼는다(원내 지도부는 의원이다).
+    for(const p of this.parties){
+      if(p.id<0) continue;
+      const mine=mps.filter(x=>x.pid===p.id);
+      if(!mine.length) continue;
+      const claim=(L, rank)=>{
+        if(!L) return;
+        let m=mps.find(x=>x.name===L.name);
+        if(!m){
+          // 아직 배정되지 않은 의원 중 가장 다선인 사람에게 그 이름을 준다
+          const cand=mine.filter(x=>!x._isLeader)
+            .sort((a,b)=>(b.terms||1)-(a.terms||1))[0];
+          if(!cand) return;
+          cand.name=L.name; cand._isLeader=true;
+          if(L.charisma!=null) cand.charisma=L.charisma;
+          if(L.integrity!=null) cand.integrity=L.integrity;
+          m=cand;
+        }
+        this._promote(m, rank);
+      };
+      for(const f of (p.factions||[])) claim(f.leader, 'facLeader');
+      claim(p.leader, 'partyLeader');
+    }
+    // 내각 구성원
+    for(const c of (this.cabinet||[])){
+      if(!c || !c.name) continue;
+      const m=mps.find(x=>x.name===c.name);
+      if(m) this._promote(m,'minister');
+    }
+    // 국가 지도자
+    const headName = this.president? (this.parties.find(p=>p.id===this.president.pid)?.leader?.name)
+                   : (this.pmName||null);
+    if(headName){ const m=mps.find(x=>x.name===headName); if(m) this._promote(m,'head'); }
+
+    // ── 스캔들 ──
+    for(const m of mps){
+      if(rnd()>0.004) continue;
+      const risk = (1-(m.integrity??0.5))*0.7 + (m.ambition??0.5)*0.3;
+      if(rnd()>risk*0.5) continue;
+      const c=this._ensureCareer(m);
+      c.scandals++;
+      m.scandal = { y:this.year(), sev: clamp(0.3+rnd()*0.6) };
+      this._careerNote(m, `비리 의혹 — ${['수뢰','공천 헌금','부동산 투기','논문 표절','병역 회피'][(rnd()*5)|0]}`, 2);
+      const p=this.parties.find(x=>x.id===m.pid);
+      if(p) p.support=clamp((p.support||0)*(1-m.scandal.sev*0.02),0,1);
+      // 계파 수장 이상이면 정당 전체가 흔들린다
+      const R=this._careerRank;
+      if((R[c.peak]||0)>=3 && p) p.support=clamp((p.support||0)*0.97,0,1);
+    }
+
+    // ── 세대 교체 압력 ──
+    // 다선 고령 의원이 많으면 소장파의 불만이 커진다
+    for(const p of this.parties){
+      if(p.id<0 || !p.factions) continue;
+      const my=mps.filter(m=>m.pid===p.id);
+      if(my.length<6) continue;
+      const oldGuard = my.filter(m=>(m.age||45)>62 && (m.terms||1)>=3).length / my.length;
+      p.gerontocracy = oldGuard;
+      if(oldGuard>0.42 && rnd()<0.06){
+        this.pushNews(2,'norm',`<b>${p.name}</b> — 세대교체 요구 분출, 소장파 반발`);
+        // 소장파 계파가 힘을 얻는다
+        const young=p.factions.find(f=>/소장|신진|청년|쇄신/.test(f.name));
+        if(young) young.share=clamp(young.share*1.08,0,1);
+        p.support=clamp((p.support||0)*0.985,0,1);
+      }
+    }
+  }
+
+  // ── 선거 결과를 경력에 반영 (rebuildMPs 이후 호출) ──
+  recordElectionCareers(prevMps){
+    if(!this.mpOn || !this.lifeOn) return;
+    const now=this.mps||[];
+    const nowNames=new Set(now.map(m=>m.name));
+    // 낙선자
+    for(const m of (prevMps||[])){
+      if(nowNames.has(m.name)) continue;
+      const c=this._ensureCareer(m);
+      c.losses++;
+      // 낙선 이력을 정당에 보관해 재기 후보로 남긴다
+      const p=this.parties.find(x=>x.id===m.pid);
+      if(p){
+        if(!p.exiles) p.exiles=[];
+        m.exiledY=this.year();
+        p.exiles.unshift(m);
+        if(p.exiles.length>12) p.exiles.pop();
+      }
+      const R=this._careerRank;
+      if((R[c.peak]||0)>=3){
+        this._careerNote(m, `낙선 — ${this._rankName(c.peak)} 출신, ${c.losses}번째 고배`, 2);
+      }
+    }
+    // 신인·재선 기록
+    for(const m of now){
+      const c=this._ensureCareer(m);
+      if((m.terms||1)===1 && !c._noted){
+        c._noted=true;
+        if(c.losses>0) this._careerNote(m, `${c.losses+1}수 끝에 원내 입성`, 2);
+      } else if((m.terms||1)===5) this._careerNote(m, '5선 중진 반열', 2);
+      else if((m.terms||1)===8) this._careerNote(m, '8선 원로', 3);
+    }
+  }
+
+  // 재기: 낙선자 중 일부가 다음 선거에서 돌아온다
+  pickComeback(p){
+    if(!p.exiles || !p.exiles.length) return null;
+    // 오래 밀려날수록 확률이 떨어지고, 야심·경력이 높을수록 돌아온다
+    for(let i=0;i<p.exiles.length;i++){
+      const m=p.exiles[i];
+      const away=this.year()-(m.exiledY||this.year());
+      const c=m.career||{};
+      const R=this._careerRank;
+      const prestige=((R[c.peak]||1)-1)*0.12;
+      const chance = clamp(0.30 + prestige + (m.ambition??0.5)*0.25 - away*0.04, 0, 0.75);
+      if(rnd()<chance){
+        p.exiles.splice(i,1);
+        m.age = (m.age||45) + away;
+        if((m.age||45) > (this.tune?this.tune.retireAge:62)+8) return null;
+        return m;
+      }
+    }
+    return null;
+  }
+
+  // 정치인 상세 (UI용)
+  politicianDossier(m){
+    if(!m) return null;
+    const c=this._ensureCareer(m);
+    const p=this.parties.find(x=>x.id===m.pid);
+    return {
+      name:m.name, age:m.age, party:p?p.name:'무소속', color:p?p.color:'#9aa8c4',
+      faction:m.facName||null, facColor:m.facColor||null,
+      terms:m.terms||1, reg:REGION_NAMES[m.reg]||'',
+      peak:this._rankName(c.peak), entered:c.entered,
+      years:this.year()-c.entered,
+      losses:c.losses, scandals:c.scandals,
+      loyalty:m.loyalty??0.5, ambition:m.ambition??0.5, integrity:m.integrity??0.5,
+      log:c.log.slice(0,8),
+    };
+  }
+
+  // 주목할 정치인 목록 (UI용)
+  notablePoliticians(n){
+    const mps=this.mps||[];
+    const R=this._careerRank;
+    return mps.slice()
+      .map(m=>({m, score:(R[(m.career?.peak)||'mp']||2)*10 + (m.terms||1)*2 + (m.career?.scandals||0)*3}))
+      .sort((a,b)=>b.score-a.score)
+      .slice(0, n||12)
+      .map(x=>this.politicianDossier(x.m));
   }
   assignDistricts(nd){
     // 유권자 대비 선거구가 너무 많으면 선거구당 표본이 무너진다(300석에 성인 1900명 → 6명).
@@ -13824,13 +14079,14 @@ const UI={
     body.style.display = mode==='party'? 'none' : '';
     if(mode==='party'){ this._updateSubBadges(); return; }
     // 각 탭의 렌더러가 쓰는 컨테이너를 body 안에 만들어 준다
-    const IDS={ally:'frontBody', fac:'facBody', opin:'opinBody', amd:'amdBody'};
+    const IDS={ally:'frontBody', fac:'facBody', opin:'opinBody', amd:'amdBody', ppl:'pplBody'};
     const id=IDS[mode];
     if(!body.querySelector('#'+id)) body.innerHTML=`<div id="${id}"></div>`;
     if(mode==='ally') this.renderFront();
     else if(mode==='fac') this.renderFactions();
     else if(mode==='opin') this.renderOpinion();
     else if(mode==='amd') this.renderAmend();
+    else if(mode==='ppl') this.renderPeople();
     this._updateSubBadges();
   },
   renderOpinion(){
@@ -14055,6 +14311,61 @@ const UI={
       }
     }
     host.innerHTML=html;
+  },
+  renderPeople(){
+    const s=this.sim, host=$('#pplBody'); if(!host)return;
+    if(!s.mpOn){ host.innerHTML='<div class="muted" style="font-size:11px">의원 개체 시스템이 꺼져 있다.</div>'; return; }
+    const list=s.notablePoliticians? s.notablePoliticians(14) : [];
+    if(!list.length){ host.innerHTML='<div class="muted" style="font-size:11px">아직 주목할 정치인이 없다.</div>'; return; }
+    const RCOL={'국가지도자':'#ffc14d','장관':'#c8a4ff','당대표':'#54e0ff','계파 수장':'#5ae0b4','국회의원':'var(--tx3)'};
+    let html='';
+    for(const d of list){
+      const col=RCOL[d.peak]||'var(--tx3)';
+      html+=`<div class="pplRow" data-ppl="${d.name}" style="padding:5px 0;border-bottom:1px solid rgba(130,170,255,0.06);cursor:pointer">
+        <div style="display:flex;align-items:center;gap:7px;font-size:11.5px">
+          <div class="pdot" style="background:${d.color}"></div>
+          <b style="color:var(--tx2)">${d.name}</b>
+          <span style="font-size:10px;color:var(--tx3)">${d.age}세 · ${d.terms}선</span>
+          <span style="margin-left:auto;font-size:9.5px;padding:1px 6px;border-radius:5px;background:${col}22;color:${col}">${d.peak}</span>
+        </div>
+        <div style="font-size:10px;color:var(--tx3);margin-top:1px;padding-left:14px">
+          ${d.party}${d.faction?' · '+d.faction:''} · 경력 ${d.years}년
+          ${d.losses?` · <span style="color:var(--am)">낙선 ${d.losses}</span>`:''}
+          ${d.scandals?` · <span style="color:var(--rd)">스캔들 ${d.scandals}</span>`:''}
+        </div>
+        ${d.log.length?`<div style="font-size:9.5px;color:var(--tx3);padding-left:14px;margin-top:2px">${d.log[0].y}년 ${d.log[0].what}</div>`:''}
+      </div>`;
+    }
+    host.innerHTML=html;
+    host.querySelectorAll('[data-ppl]').forEach(el=>{
+      el.onclick=()=>{ const m=(s.mps||[]).find(x=>x.name===el.dataset.ppl); if(m) this.showPolitician(m); };
+    });
+  },
+  showPolitician(m){
+    const s=this.sim, d=s.politicianDossier(m); if(!d) return;
+    const bar=(l,v,c)=>`<div style="display:flex;align-items:center;gap:7px;font-size:11px;padding:1.5px 0">
+      <span style="min-width:48px;color:var(--tx3)">${l}</span>
+      <div style="flex:1;height:6px;border-radius:3px;background:rgba(120,140,180,0.12);overflow:hidden;max-width:110px">
+        <div style="width:${(v*100).toFixed(0)}%;height:100%;background:${c}"></div></div>
+      <span style="font-family:var(--mono);font-size:9.5px;color:var(--tx3)">${v.toFixed(2)}</span></div>`;
+    let html=`<div style="font-size:12px;line-height:1.9;color:var(--tx2)">
+      <b style="color:${d.color};font-size:14px">${d.name}</b> ${d.age}세 · ${d.terms}선<br>
+      ${d.party}${d.faction?` · <span style="color:${d.facColor||'var(--tx3)'}">${d.faction}</span>`:''} · ${d.reg}<br>
+      최고 직위 <b>${d.peak}</b> · ${d.entered}년 정계 입문 (경력 ${d.years}년)
+      ${d.losses?`<br><span style="color:var(--am)">낙선 ${d.losses}회</span>`:''}
+      ${d.scandals?` <span style="color:var(--rd)">· 스캔들 ${d.scandals}건</span>`:''}
+    </div>
+    <div style="margin-top:10px;border-top:1px solid rgba(130,170,255,0.12);padding-top:8px">`;
+    html+=bar('당론 충실', d.loyalty, '#54e0ff')+bar('야심', d.ambition, '#ffb24d')+bar('청렴', d.integrity, '#5ae0b4');
+    html+='</div>';
+    if(d.log.length){
+      html+='<div style="margin-top:10px"><div style="font-size:9.5px;color:var(--tx3);letter-spacing:1px;margin-bottom:4px">경력 연표</div>';
+      for(const l of d.log) html+=`<div style="display:flex;gap:8px;font-size:11px;padding:1.5px 0">
+        <span style="font-family:var(--mono);color:var(--tx3);min-width:38px">${l.y}년</span>
+        <span style="color:var(--tx2)">${l.what}</span></div>`;
+      html+='</div>';
+    }
+    this._modal('정치인', html);
   },
   renderMedia(){
     const s=this.sim, host=$('#mediaBody'); if(!host)return;
