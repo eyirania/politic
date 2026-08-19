@@ -6507,7 +6507,24 @@ class Sim {
     return [
       {key:'pr',      name:'비례성 강화',     desc:'봉쇄 인하·비례 확대',
        who:'만년 야당', apply:c=>{ c.threshold=Math.max(0, (c.threshold||3)-2);
-                                   if(c.method==='FPTP') c.method='PARALLEL'; c.districtRatio=Math.max(0.4,(c.districtRatio??0.6)-0.15); }},
+         // 다수제 → 비례제 사다리를 한 칸씩 오른다
+         const up={FPTP:'RUNOFF', RUNOFF:'PARALLEL', AV:'PARALLEL', GRC:'SNTV',
+                   SNTV:'STV', STV:'PARALLEL', PARALLEL:'MMP', MMP:'PR'};
+         if(up[c.method]) c.method=up[c.method];
+         c.districtRatio=Math.max(0.35,(c.districtRatio??0.6)-0.12); }},
+      {key:'major',   name:'다수제 전환',     desc:'안정 정부를 위한 선거제 개편',
+       who:'거대 정당', apply:c=>{
+         // 비례제 → 다수제 사다리를 한 칸씩 내려온다
+         const down={PR:'MMP', MMP:'PARALLEL', PARALLEL:'RUNOFF', STV:'SNTV',
+                     SNTV:'GRC', RUNOFF:'FPTP', AV:'FPTP'};
+         if(down[c.method]) c.method=down[c.method];
+         c.districtRatio=Math.min(0.9,(c.districtRatio??0.6)+0.12); }},
+      {key:'exotic',  name:'선거제 실험',     desc:'새로운 개표 방식 도입',
+       who:'개혁 세력', apply:c=>{
+         // 드물게 이색 제도로 갈아탄다 (현실에선 희귀하나 순환을 위해 허용)
+         const pool=['AV','STV','GRC','SNTV','RUNOFF'].filter(m=>m!==c.method);
+         c.method=pool[(rnd()*pool.length)|0];
+         if(c.method==='SNTV'||c.method==='STV'||c.method==='GRC') c.sntvMag=2+((rnd()*6)|0); }},
       {key:'bar',     name:'봉쇄조항 인상',   desc:'군소정당 진입 차단',
        who:'거대 정당', apply:c=>{ c.threshold=Math.min(10, (c.threshold||3)+2); }},
       {key:'term',    name:'임기 연장',       desc:'대통령·의회 임기 확대',
@@ -6535,6 +6552,29 @@ class Sim {
        who:'중앙 정부', apply:c=>{}, side:s=>{ s.federalPower=clamp((s.federalPower??0.5)-0.22,0,1); }},
       {key:'civilian',name:'문민 통제 강화',  desc:'군의 정치 개입 차단',
        who:'시민사회', apply:c=>{}, side:s=>{ s.milInfluence=clamp(s.milInfluence-16,0,100); s.demIndex=clamp((s.demIndex??60)+5,0,100); }},
+      // ── 선거제를 되돌리는 의제 ──
+      // 현실에서는 비례제 → 다수제 회귀가 드물지만, 여기서는 순환을 위해 넣는다.
+      {key:'major',   name:'다수제 전환',     desc:'안정적 단독정부 확보',
+       who:'거대 정당', apply:c=>{
+         const back={PR:'MMP', MMP:'PARALLEL', PARALLEL:'FPTP', STV:'SNTV', SNTV:'FPTP',
+                     AV:'FPTP', GRC:'FPTP', RUNOFF:'FPTP', FPTP:'FPTP'};
+         c.method=back[c.method]||'FPTP';
+         if(c.method==='PARALLEL'||c.method==='MMP') c.districtRatio=Math.min(0.85,(c.districtRatio??0.6)+0.15);
+         if(c.axes){ c.axes.prMix = c.method==='FPTP'?'none' : c.method==='MMP'?'mmp':'parallel';
+           if(c.method==='FPTP'||c.method==='SNTV') c.axes.distMode = c.method==='SNTV'?'multi':'single'; }
+       }},
+      {key:'district',name:'지역구 확대',     desc:'지역 대표성 강화',
+       who:'지역 의원', apply:c=>{
+         if(c.method==='PR'){ c.method='PARALLEL'; c.districtRatio=0.5; }
+         else c.districtRatio=Math.min(0.9,(c.districtRatio??0.6)+0.12);
+         if(c.axes) c.axes.distMode='single';
+       }},
+      {key:'multiseat',name:'중선거구 도입',  desc:'한 선거구에서 여러 명',
+       who:'중견 정당', apply:c=>{
+         if(c.method==='FPTP'||c.method==='RUNOFF'||c.method==='AV'){ c.method='SNTV'; }
+         c.sntvMag=Math.max(2, Math.min(7,(c.sntvMag||3)+1));
+         if(c.axes){ c.axes.distMode='multi'; c.axes.distMag=c.sntvMag; }
+       }},
     ];
   }
 
@@ -6544,7 +6584,7 @@ class Sim {
     const E=this.elections[this.elections.length-1];
     const T=this.parties.reduce((a,p)=>a+(p.seats||0),0)||1;
     // 만년 야당: 득표 대비 의석이 계속 손해면 비례성을 요구한다
-    if(E && E.gallagher>3.5){
+    if(E && E.gallagher>2.5){
       const losers=this.parties.filter(p=>p.id>=0 && (p.support||0)>0.06 && (p.seats||0)/T < (p.support||0)*0.7);
       if(losers.length) out.push({key:'pr', urge:clamp(0.30+E.gallagher/25,0.3,1), by:losers[0].name});
     }
@@ -6572,6 +6612,19 @@ class Sim {
     }
     // 군부: 영향력이 크면 권한 헌법화
     if(this.milInfluence>45) out.push({key:'military', urge:clamp(0.35+(this.milInfluence-45)/50,0.35,1), by:'군부'});
+    // 거대 정당: 정부 구성이 어렵거나 정당이 난립하면 다수제로 되돌리려 한다
+    {
+      const govN=this.govCoalition.length;
+      const propish = ['PR','MMP','STV','PARALLEL'].includes(C.method);
+      if(propish && (govN>=2 || (E && E.enpS>2.6) || this.gridlock)){
+        const top=[...this.parties].filter(p=>p.id>=0).sort((a,b)=>(b.seats||0)-(a.seats||0))[0];
+        if(top) out.push({key:'major', urge:clamp(0.40+(govN-2)*0.10+((E?E.enpS:3)-2.6)*0.12,0.40,1), by:top.name});
+      }
+    }
+    // 선거제 실험: 불비례가 크거나 정치 불신이 높을 때 이색 제도가 거론된다
+    if((E && E.gallagher>4) || (this.demIndex??60)<62){
+      if(rnd()<0.6) out.push({key:'exotic', urge:0.36+rnd()*0.26, by:'개혁 세력'});
+    }
     // ── 되돌리는 요구 ──
     // 임기가 길고 국정 지지가 낮으면 단축 요구가 나온다
     if((C.term||4)>=5 && (this.govApproval??0.5)<0.58)
@@ -6587,6 +6640,18 @@ class Sim {
       let mx=0; if(this.stateGrievance) for(let r=0;r<NREG;r++) mx=Math.max(mx,this.stateGrievance[r]);
       if(mx>0.20 || S.stability<50) out.push({key:'central', urge:clamp(0.38+mx,0.38,1), by:'중앙 정부'});
     }
+    // ── 선거제 되돌리기 ──
+    // 정당이 난립하거나 연정 구성이 어려우면 거대 정당이 다수제를 요구한다
+    if(E && E.enpS>3.6 && (C.method==='PR'||C.method==='MMP'||C.method==='PARALLEL'||C.method==='STV')){
+      const top=[...this.parties].filter(p=>p.id>=0).sort((a,b)=>(b.seats||0)-(a.seats||0))[0];
+      if(top) out.push({key:'major', urge:clamp(0.34+(E.enpS-3.5)/5,0.34,1), by:top.name});
+    }
+    // 비례 비중이 크면 지역 의원들이 지역구 확대를 요구한다
+    if(C.method==='PR' || ((C.method==='PARALLEL'||C.method==='MMP') && (C.districtRatio??0.6)<0.62))
+      out.push({key:'district', urge:0.34+rnd()*0.28, by:'지역 의원'});
+    // 소선거구에서 사표가 많으면 중견 정당이 중선거구를 요구한다
+    if((C.method==='FPTP'||C.method==='RUNOFF'||C.method==='AV') && E && E.gallagher>4)
+      out.push({key:'multiseat', urge:clamp(0.34+E.gallagher/30,0.34,1), by:'중견 정당'});
     // 민주주의가 회복되면 군을 되돌리려 한다
     if(this.milInfluence>20 && (this.demIndex??60)>42)
       out.push({key:'civilian', urge:clamp(0.40+this.milInfluence/120,0.40,1), by:'시민사회'});
@@ -6607,10 +6672,10 @@ class Sim {
     // 국면이 없으면 요구가 임계를 넘었을 때 시작한다
     if(!M){
       if(this.referendum) return;
-      if(this.tick-(this._lastMomentEnd||-600)<120) return;   // 10년 간격
+      if(this.tick-(this._lastMomentEnd||-600)<84) return;   // 7년 간격
       const dem=this.detectAmendDemand();
       if(!dem.length || dem[0].urge<0.25) return;
-      if(rnd()>0.20) return;
+      if(rnd()>0.30) return;
       const bank=this._amendAgenda;
       // 직전과 같은 의제가 연달아 나오면 다양성이 없다. 다른 의제를 우선한다.
       let pick0=dem[0];
@@ -6724,6 +6789,11 @@ class Sim {
       case 'unsenate':return share>0.25? 0.35 : -0.2;    // 큰 정당이 원한다(입법 걸림돌 제거)
       case 'central': return (p.regAff && p.regAff.some(v=>v>0.05))? -0.55 : 0.4;
       case 'civilian':return this.milInfluence>50? 0.5 : 0.2;
+      case 'major':   return share > sup*1.05? 0.7 : -0.55;   // 이득 보는 정당이 찬성
+      case 'exotic':  return share < sup*0.9? 0.45 : -0.25;   // 손해 보는 정당이 실험을 원한다
+      case 'major':    return share > sup*1.05? 0.6 : -0.5;    // 과대대표 받는 정당이 원한다
+      case 'district': return (p.regAff && p.regAff.some(v=>v>0.05))? 0.55 : (share>0.2? 0.3 : -0.35);
+      case 'multiseat':return share<0.28 && sup>0.08? 0.55 : -0.3;
       default: return 0;
     }
   }
