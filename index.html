@@ -8159,7 +8159,8 @@ class Sim {
     if(child.lineage.events.length>10) child.lineage.events.pop();
   }
 
-  partyDossier(pid){
+  // 이념·조직 프로필. 기존 partyDossier(saga)와 이름이 겹쳐 덮어쓰던 것을 분리한다.
+  partyProfile(pid){
     const p=this.parties.find(x=>x.id===pid);
     if(!p) return null;
     const lab=this.ideologyLabel(p);
@@ -12931,11 +12932,17 @@ const UI={
       if(e.target.closest('#psMore')){ this._psExpand=true; this.renderParties(); return; }
       if(e.target.closest('#psLess')){ this._psExpand=false; this.renderParties(); return; }
       // 계파 접기/펼치기 (아코디언)
+      // 계파 토글은 전용 버튼에서만 (행 클릭은 정당 상세로 간다)
+      const ft=e.target.closest('[data-factgl]');
+      if(ft){
+        const fid=+ft.dataset.factgl;
+        if(!this._facOpen)this._facOpen=new Set();
+        if(this._facOpen.has(fid))this._facOpen.delete(fid); else this._facOpen.add(fid);
+        this.renderParties(); return;
+      }
       const row=e.target.closest('.party[data-pid]'); if(!row)return;
       const pid=+row.dataset.pid;
-      if(!this._facOpen)this._facOpen=new Set();
-      if(this._facOpen.has(pid))this._facOpen.delete(pid); else this._facOpen.add(pid);
-      this.renderParties();
+      this.showParty(pid); return;
     };
     $('#spClose').onclick=()=>{ $('#splitPage').classList.remove('show'); this.paused=this._spPrev; };
     $('#spFrac').oninput=()=>{ $('#spFracV').textContent=$('#spFrac').value+'%'; };
@@ -16654,6 +16661,9 @@ const UI={
 
   renderParties(){
     const s=this.sim;
+    // 상원이 있으면 정당별 상원 의석을 병기한다 (하원 큰 숫자 + 상원 작은 숫자)
+    const senMap = (s.con.senate!=='NONE' && s.senate && s.senate.length)
+      ? new Map(s.senate.map(x=>[x.id, x.seats||0])) : null;
     // 지지율 순 정렬에도 히스테리시스: 1%p 이상 벌어져야 자리 교체
     if(!this._plOrder) this._plOrder=[];
     const liveIds=new Set(s.parties.map(p=>p.id));
@@ -16700,7 +16710,7 @@ const UI={
             }
           }
           facHtml=`<div class="facStrip"><div class="facBar">${segs}</div><div class="facLabels">${labels}</div>${nomHtml}</div>`;
-          facHint=`<span class="facTgl" style="color:var(--cy)">▾ 계파 ${p.factions.length}</span>`;
+          facHint=`<span class="facTgl" data-factgl="${p.id}" style="color:var(--cy);cursor:pointer">▾ 계파 ${p.factions.length}</span>`;
         } else {
           facHint=`<span class="facTgl">▸ 계파 ${p.factions.length}</span>`;
         }
@@ -16712,7 +16722,7 @@ const UI={
         <button class="banBtn edit" data-edit="${p.id}" title="편집">✎</button>
         <button class="banBtn split" data-split="${p.id}" title="분당">⑂</button>
         <button class="banBtn" data-ban="${p.id}" title="강제 해산">✕</button>
-        <div class="pstat"><div class="seats">${p.seats}석${(p.dSeats||p.pSeats)?`<span style="font-size:9.5px;color:var(--tx3)"> 지${p.dSeats||0}·비${p.pSeats||0}</span>`:''}</div><div class="sup">${(p.support*100).toFixed(1)}%</div></div>
+        <div class="pstat"><div class="seats">${p.seats}석${senMap? `<span style="font-size:10px;color:var(--tx3);margin-left:3px" title="상원">·${senMap.get(p.id)||0}</span>`:''}${(p.dSeats||p.pSeats)?`<span style="font-size:9.5px;color:var(--tx3)"> 지${p.dSeats||0}·비${p.pSeats||0}</span>`:''}</div><div class="sup">${(p.support*100).toFixed(1)}%</div></div>
       </div>`;}).join('')
       : '<div class="muted">아직 정당이 없다. 시민 심리가 군집을 이루면 정치 세력이 스스로 태어난다.</div>';
     // 정당 과다 시 접힘 요약 행
