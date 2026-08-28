@@ -415,6 +415,9 @@ canvas.chart.tall{height:210px}
         <button class="cOpt" data-scope="min">최소</button>
       </div>
       <div id="introScopeDesc" style="font-size:10.5px;color:#8fa3c8;margin-bottom:12px">핵심 시스템만 켠다 — 정당·선거·정부·계파·쟁점.</div>
+      <div style="font-size:11px;letter-spacing:2px;color:#8fa3c8;margin:12px 0 7px 0">인명 문화권</div>
+      <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:6px" id="introName"></div>
+      <div style="font-size:10.5px;color:#8fa3c8;margin-bottom:10px">정치인·의원 이름의 문화권. 국가 프리셋을 고르면 자동으로 맞춰진다.</div>
       <button id="introAdvToggle" style="width:100%;text-align:left;background:none;border:none;color:#8fa3c8;font-size:11px;letter-spacing:2px;margin-bottom:9px;cursor:pointer;font-family:inherit;padding:0">▸ 국토 설정 (선택)</button>
       <div id="introAdv" style="display:none">
       <div style="display:flex;gap:6px;flex-wrap:wrap" id="introRegMode">
@@ -1224,7 +1227,7 @@ const FORMNAME = { PARL:'의원내각제', PRES:'대통령제', SEMI:'이원집�
 const METHODNAME = { FPTP:'소선거구 단순다수', RUNOFF:'결선투표제', PR:'정당명부 비례', MMP:'연동형 비례', PARALLEL:'병립형 혼합', SNTV:'중선거구 단기非이양', AV:'선호투표(호주식)', STV:'단기이양식(아일랜드식)', GRC:'집단선거구(싱가포르식)' };
 const METHOD_KEYS = ['FPTP','RUNOFF','AV','SNTV','STV','GRC','PARALLEL','MMP','PR'];
 // 상원 선출
-const SENNAME = { NONE:'없음(단원제)', FEDERAL:'연방 주별 균등', POPULAR:'전국 직선 비례', APPOINTED:'간선·임명', ESTATE:'귀족원(신분)' };
+const SENNAME = { NONE:'없음(단원제)', FEDERAL:'연방 주별 균등', POPULAR:'전국 직선 비례', APPOINTED:'간선·임명', ESTATE:'귀족원(신분)', VOCATIONAL:'직능 대표(아일랜드형)' };
 // ── 신분제 ──
 const ESTATE_NAME = ['성직자','귀족','부르주아','평민','농노'];
 const ESTATE_COL  = ['#c9a227','#b08cff','#54e0ff','#9dff5a','#8b7355'];
@@ -2167,6 +2170,9 @@ class Sim {
     this.asymOn = true;            // 비대칭 연방주의
     this.autonomy = null; this.distinct = null;
     this.orgOn = true;             // 정당 조직력
+    this.sectOn = false;           // 종파 배분 (레바논형)
+    this.sects = null; this.sectOf = null;
+    this.doubleMajority = false;   // 이중 다수 (스위스형)
     this.labelOn = true;           // 이념 라벨링
     this.govApproval = 0.5; this.govEvalAvg = 0;
     this.policyOpinion = []; this.noParty = null;
@@ -2832,6 +2838,7 @@ class Sim {
     this.stepPoliticianLives();
     this.stepAsymFederal();
     this.stepPartyOrg();
+    this.stepSects();
     this.stepResourceRent();
     if(this.tick-this.lastElection>=this.elecInterval && this.parties.some(p=>p.support>0.04)){
       this.lastElection=this.tick; this.election();
@@ -2975,13 +2982,6 @@ class Sim {
     const stem=s.slice(0, s.length-suf.length);
     const room=Math.max(1, 10-suf.length);
     return stem.slice(0, room)+suf;
-  }
-  _politicianName(){
-    const sur=['김','이','박','최','정','강','조','윤','장','임','한','오','서','신','권','황','안','송','류','전','홍','고','문','손','배','백','허','유','남','심'];
-    const g1=['재','정','성','지','승','준','현','민','상','우','경','태','종','형','국','병','동','영','광','대','진','수','호','석','원','철','용','기','선','명'];
-    const g2=['훈','수','호','민','준','현','우','성','철','석','진','환','욱','희','연','아','은','빈','규','하','윤','솔','담','겸','율'];
-    const pick=a=>a[(rnd()*a.length)|0];
-    return pick(sur)+pick(g1)+pick(g2);
   }
   _makeLeader(fac, p){
     const L = {
@@ -8725,6 +8725,371 @@ class Sim {
     return { votes:R.votes||new Map(), cast:R.cast||1, gallSrc:null, stats,
              total:T2, expanded:!!R.expanded, bestLosers:R.bestLosers||[] };
   }
+  // ════════ 인명 문화권 ════════
+  // 기존에는 한국식 이름만 생성했다. 프리셋이 일본·독일·스페인이어도 "김재훈"이 나왔다.
+  // 문화권별 이름 풀을 두고, 프리셋이 그것을 고른다.
+  //
+  // 표기 순서도 문화권마다 다르다 — 동아시아는 성-이름, 서구는 이름-성.
+
+  get _nameBanks(){
+    return {
+      ko: { order:'sf', label:'한국',
+        sur:['김','이','박','최','정','강','조','윤','장','임','한','오','서','신','권','황','안','송','류','전','홍','고','문','손','배','백','허','유','남','심'],
+        g1:['재','정','성','지','승','준','현','민','상','우','경','태','종','형','국','병','동','영','광','대','진','수','호','석','원','철','용','기','선','명'],
+        g2:['훈','수','호','민','준','현','우','성','철','석','진','환','욱','희','연','아','은','빈','규','하','윤','솔','담','겸','율'] },
+
+      ja: { order:'sf', label:'일본',
+        sur:['사토','스즈키','다카하시','다나카','이토','와타나베','야마모토','나카무라','고바야시','가토',
+             '요시다','야마다','사사키','야마구치','마쓰모토','이노우에','기무라','하야시','시미즈','사이토',
+             '이시카와','모리','아베','이케다','하시모토','야마시타','오가와','이시이','하세가와','고토'],
+        g1:['히로','다카','마사','유키','가즈','노부','아키','하루','신','겐','다이','슈','고','도모','요시'],
+        g2:['시','오','키','토','로','미','코','노리','히코','스케','타로','지로','야','아키','후미'] },
+
+      en: { order:'fs', label:'영미',
+        g1:['James','William','Henry','Thomas','Edward','Robert','Charles','George','Arthur','Richard',
+            'Margaret','Eleanor','Catherine','Elizabeth','Helen','Alice','Grace','Sarah','Emily','Clara',
+            'Michael','David','John','Peter','Samuel','Daniel','Andrew','Patrick','Nathan','Oliver'],
+        sur:['Ashford','Blackwood','Carrington','Delaney','Ellsworth','Fairbanks','Grantham','Harrow',
+             'Ingram','Kellerman','Langford','Merrick','Norwood','Pemberton','Quill','Radcliffe',
+             'Sinclair','Thorne','Vance','Whitmore','Bexley','Caldwell','Dunmore','Fenwick','Hollis'] },
+
+      de: { order:'fs', label:'독일',
+        g1:['Friedrich','Wilhelm','Otto','Karl','Heinrich','Ernst','Ludwig','Gustav','Hermann','Kurt',
+            'Anneliese','Ingrid','Helga','Ursula','Brigitte','Gertrud','Sabine','Renate','Monika','Petra',
+            'Klaus','Jürgen','Dieter','Rainer','Volker','Manfred','Horst','Werner','Bernd','Gerhard'],
+        sur:['Bergmann','Dietrich','Ehrhardt','Fischbach','Grünwald','Hoffmann','Kellner','Lindemann',
+             'Meinhardt','Neumann','Obermann','Pfeiffer','Reinhardt','Schwarzkopf','Vogel','Weissmann',
+             'Zimmermann','Baumgartner','Eichhorn','Falkenrath','Habermas','Kranz','Steinbach'] },
+
+      fr: { order:'fs', label:'프랑스',
+        g1:['Jean','Pierre','Henri','Louis','Antoine','Étienne','Guillaume','Nicolas','Philippe','Olivier',
+            'Marguerite','Céline','Amélie','Sylvie','Camille','Hélène','Isabelle','Nathalie','Véronique','Claire',
+            'François','Michel','Alain','Bernard','Didier','Laurent','Thierry','Vincent','Julien','Marc'],
+        sur:['Beaumont','Chevalier','Delacroix','Fontaine','Gagnon','Laurent','Moreau','Nguyen','Perrin',
+             'Rousseau','Simon','Thibault','Vasseur','Bonnet','Charpentier','Dubois','Fournier','Girard',
+             'Lambert','Marchand','Petit','Renard','Sauvage','Villeneuve'] },
+
+      es: { order:'fs', label:'스페인',
+        g1:['José','Antonio','Manuel','Francisco','Carlos','Javier','Alejandro','Rafael','Miguel','Ignacio',
+            'María','Carmen','Isabel','Pilar','Lucía','Elena','Rosario','Beatriz','Nuria','Cristina',
+            'Alberto','Ramón','Enrique','Fernando','Sergio','Álvaro','Pablo','Andrés','Diego','Óscar'],
+        sur:['Álvarez','Bermúdez','Castillo','Delgado','Echeverría','Fuentes','Gutiérrez','Herrera',
+             'Iglesias','Jiménez','Lozano','Montoya','Navarro','Ortega','Peralta','Quintana','Ramírez',
+             'Salazar','Trujillo','Vargas','Zamora','Aguirre','Cabrera','Escobar'] },
+
+      ru: { order:'fs', label:'러시아',
+        g1:['Ivan','Dmitri','Sergei','Alexei','Nikolai','Mikhail','Viktor','Pavel','Andrei','Boris',
+            'Tatiana','Olga','Irina','Svetlana','Natalia','Yelena','Anna','Marina','Ludmila','Vera',
+            'Vladimir','Yuri','Igor','Oleg','Anatoly','Gennady','Leonid','Konstantin','Maxim','Roman'],
+        sur:['Volkov','Sokolov','Morozov','Lebedev','Novikov','Kozlov','Orlov','Popov','Sorokin',
+             'Zhukov','Belyaev','Gordeyev','Filatov','Ignatov','Karpov','Medvedev','Nikitin','Pavlov',
+             'Rybakov','Semyonov','Tarasov','Ustinov','Yakovlev','Zaitsev'] },
+
+      ar: { order:'fs', label:'아랍',
+        g1:['Ahmad','Omar','Khalid','Yusuf','Ibrahim','Hassan','Tariq','Faisal','Rashid','Nabil',
+            'Layla','Fatima','Amina','Zainab','Noor','Salma','Huda','Rania','Yasmin','Mariam',
+            'Karim','Samir','Waleed','Bashir','Jamal','Adel','Ziad','Munir','Hakim','Saif'],
+        sur:['al-Rashid','al-Mansour','al-Hakim','al-Sabah','al-Faisal','Nasser','Haddad','Khoury',
+             'Sabbagh','Darwish','Aziz','Farouk','Ghanem','Jaber','Kassem','Mahfouz','Qadir',
+             'Rahman','Shaheen','Tawfiq','Zaher'] },
+
+      br: { order:'fs', label:'브라질',
+        g1:['João','Pedro','Carlos','Luiz','Paulo','Marcos','Rafael','Bruno','Gustavo','Ricardo',
+            'Ana','Maria','Juliana','Fernanda','Patrícia','Camila','Beatriz','Larissa','Renata','Vitória',
+            'Fernando','Eduardo','Rodrigo','Felipe','Thiago','Márcio','Alexandre','Leandro','Vinícius','Danilo'],
+        sur:['Silva','Santos','Oliveira','Souza','Rodrigues','Ferreira','Almeida','Costa','Gomes',
+             'Martins','Araújo','Barbosa','Cardoso','Dias','Freitas','Nascimento','Pereira','Ribeiro',
+             'Rocha','Teixeira','Vieira','Machado','Moreira'] },
+
+      in: { order:'fs', label:'인도',
+        g1:['Rajesh','Anil','Vikram','Suresh','Arjun','Ravi','Sanjay','Deepak','Manoj','Ashok',
+            'Priya','Anita','Kavita','Meera','Sunita','Rekha','Neha','Pooja','Divya','Shalini',
+            'Amit','Rahul','Nitin','Prakash','Vijay','Sunil','Rakesh','Harish','Mahesh','Naveen'],
+        sur:['Sharma','Verma','Patel','Reddy','Nair','Iyer','Gupta','Chatterjee','Banerjee','Desai',
+             'Joshi','Kulkarni','Menon','Rao','Singh','Trivedi','Bhatt','Chauhan','Malhotra','Sinha'] },
+    };
+  }
+
+  // 현재 문화권 (기본 한국)
+  get nameCulture(){ return this._nameCulture || 'ko'; }
+  setNameCulture(k){
+    if(this._nameBanks[k]) this._nameCulture=k;
+    return this.nameCulture;
+  }
+  nameCultureList(){
+    return Object.entries(this._nameBanks).map(([k,v])=>({key:k, label:v.label}));
+  }
+
+  _politicianName(culture){
+    const B=this._nameBanks;
+    const key = culture || this.nameCulture;
+    const b = B[key] || B.ko;
+    const pick=a=>a[(rnd()*a.length)|0];
+    if(b.order==='sf'){
+      // 성-이름 (동아시아)
+      if(key==='ja') return pick(b.sur)+' '+pick(b.g1)+pick(b.g2);
+      return pick(b.sur)+pick(b.g1)+pick(b.g2);
+    }
+    // 이름-성 (서구)
+    return pick(b.g1)+' '+pick(b.sur);
+  }
+  // ════════ 특수 정치체제 4종 ════════
+  //
+  // ① 안분표 (按分票)   — 일본 SNTV. 정당명만 쓴 표를 후보 득표 비율로 소수점 배분
+  // ② 직능 상원         — 아일랜드 Seanad·슬로베니아. 정당이 아니라 이익집단이 의석을 갖는다
+  // ③ 이중 다수         — 스위스. 국민 과반 + 칸톤 과반을 모두 넘어야 개헌
+  // ④ 종파 배분         — 레바논. 의석과 직위를 집단별로 고정 할당
+
+  // ────────── ① 안분표 ──────────
+  // 유권자 일부는 후보 이름 대신 정당명만 적는다. 그 표를 어떻게 나눌 것인가.
+  // 일본 참의원은 후보 득표 비율대로 소수점까지 쪼갠다. 0.001표 차이로 당락이 갈린 적도 있다.
+  get proportionalRemainder(){ return this.con.anbun===true; }
+
+  applyAnbun(slate, partyVotes, listShare){
+    // listShare: 정당명 표의 비율 (0.15면 15%가 정당명만 기재)
+    const ls = listShare ?? (this.con.anbunShare ?? 0.18);
+    const byParty=new Map();
+    for(const c of slate){ if(!byParty.has(c.pid)) byParty.set(c.pid,[]); byParty.get(c.pid).push(c); }
+    for(const [pid, cands] of byParty){
+      if(cands.length<2) continue;
+      const total=partyVotes.get(pid)||0;
+      if(total<=0) continue;
+      // 개인표와 정당명표를 분리
+      const listVotes = total*ls;
+      const nameVotes = total-listVotes;
+      // 개인표는 이미 slate에 배분되어 있다고 보고, 그 비율로 정당명표를 안분한다
+      const sum=cands.reduce((a,c)=>a+c.votes,0)||1;
+      for(const c of cands){
+        const ratio=c.votes/sum;
+        // 소수점을 그대로 유지한다 — 이것이 안분표의 핵심
+        c.anbun = listVotes*ratio;
+        c.votes = c.votes*(nameVotes/sum*cands.length/cands.length) + c.anbun;
+      }
+      // 소수점 3자리까지 보존 (일본 실제 관행)
+      for(const c of cands) c.votes = Math.round(c.votes*1000)/1000;
+    }
+    return slate;
+  }
+
+  // ────────── ② 직능 상원 ──────────
+  // 정당이 아니라 이익집단이 직접 의석을 갖는다.
+  // 아일랜드는 5개 직능 패널 + 대학 졸업생 선거구를 둔다.
+  get _vocationalPanels(){
+    return [
+      {key:'labor',    name:'노동',       share:0.20, lobby:'labor'},
+      {key:'business', name:'산업·상업',  share:0.20, lobby:'business'},
+      {key:'agri',     name:'농림',       share:0.16, lobby:'landlord'},
+      {key:'culture',  name:'문화·교육',  share:0.16, lobby:'green'},
+      {key:'admin',    name:'행정',       share:0.14, lobby:'security'},
+      {key:'univ',     name:'대학 졸업생', share:0.14, lobby:null},   // 학위가 곧 선거권
+    ];
+  }
+
+  electVocationalSenate(T){
+    const alloc=new Map();
+    const panels=this._vocationalPanels;
+    const seatsBy=panels.map(p=>Math.max(1, Math.round(T*p.share)));
+    // 반올림 보정
+    let used=seatsBy.reduce((a,b)=>a+b,0);
+    while(used>T){ const i=seatsBy.indexOf(Math.max(...seatsBy)); if(seatsBy[i]<=1)break; seatsBy[i]--; used--; }
+    while(used<T){ const i=seatsBy.indexOf(Math.min(...seatsBy)); seatsBy[i]++; used++; }
+
+    this._senatePanels=[];
+    for(let k=0;k<panels.length;k++){
+      const P=panels[k], n=seatsBy[k];
+      if(n<=0) continue;
+      // 그 직능에 속한 시민의 정당 분포로 의석을 나눈다
+      const cnt=new Map(); let tot=0;
+      for(let i=0;i<N;i++){
+        if(this.age[i]<this.con.voteAge || this.party[i]<0) continue;
+        if(!this._inPanel(i, P)) continue;
+        cnt.set(this.party[i],(cnt.get(this.party[i])||0)+1); tot++;
+      }
+      if(!tot){
+        // 해당 직능 인구가 없으면 전국 지지율로 대체
+        for(const p of this.parties) if(p.id>=0 && p.support>0.02){ cnt.set(p.id, p.support); tot+=p.support; }
+      }
+      const sub=this.allocByFormula? this.allocByFormula(cnt, n, 'hare', 0, tot)
+                                   : this._allocPR(cnt, n, tot, 0);
+      const rows=[];
+      sub.forEach((v,id)=>{ alloc.set(id,(alloc.get(id)||0)+v);
+        const pp=this.parties.find(q=>q.id===id); if(pp) rows.push({name:pp.name, color:pp.color, seats:v}); });
+      rows.sort((a,b)=>b.seats-a.seats);
+      this._senatePanels.push({name:P.name, seats:n, parties:rows});
+    }
+    return alloc;
+  }
+
+  _inPanel(i, P){
+    if(P.key==='univ') return (this.education[i]||0) > 0.68;              // 고학력 = 대학 선거구
+    // 난수를 쓰면 전체 시뮬의 난수 흐름이 바뀌어 다른 결과에 영향을 준다.
+    // 결정적 해시로 대체한다.
+    if(!this.econRole) return ((i*2654435761)>>>0) % 1000 < P.share*1000;
+    const r=this.econRole[i];
+    if(P.key==='labor')    return r===2;                                   // 임금노동
+    if(P.key==='business') return r===0 || r===1;                          // 자본가·자영업
+    if(P.key==='agri')     return (typeof REGION_TRAITS!=='undefined')
+                                  && REGION_TRAITS[this.region[i]]
+                                  && REGION_TRAITS[this.region[i]].ind==='farm';
+    if(P.key==='culture')  return (this.education[i]||0)>0.55 && (this.openness[i]||0)>0.5;
+    if(P.key==='admin')    return (this.jobSec[i]||0)>0.62;
+    return false;
+  }
+
+  senatePanelStatus(){ return this._senatePanels||null; }
+
+  // ────────── ③ 이중 다수 ──────────
+  // 스위스: 국민 과반 + 칸톤 과반. 인구가 적은 지역이 과대 대표되므로
+  // 국민 다수가 찬성해도 부결될 수 있다.
+  evaluateDoubleMajority(R){
+    const va=this.con.voteAge??18;
+    let natY=0, natT=0;
+    const regY=new Array(NREG).fill(0), regT=new Array(NREG).fill(0);
+    for(let i=0;i<N;i+=2){
+      if(this.age[i]<va) continue;
+      const yes = rnd() < this._refYesP(i, R);
+      natT++; if(yes) natY++;
+      const r=this.region[i]; regT[r]++; if(yes) regY[r]++;
+    }
+    const natRate = natT? natY/natT : 0;
+    let regPass=0, regCount=0;
+    const detail=[];
+    for(let r=0;r<NREG;r++){
+      if(!regT[r]) continue;
+      regCount++;
+      const rate=regY[r]/regT[r];
+      if(rate>0.5) regPass++;
+      detail.push({reg:r, name:(typeof REGION_NAMES!=='undefined')? REGION_NAMES[r] : ('지역'+r), rate});
+    }
+    const regRate = regCount? regPass/regCount : 0;
+    return {
+      national: natRate, regions: regRate,
+      regionPass: regPass, regionTotal: regCount,
+      passed: natRate>0.5 && regRate>0.5,
+      // 국민은 찬성했으나 지역에서 막힌 경우 (스위스의 전형)
+      blockedByRegions: natRate>0.5 && regRate<=0.5,
+      detail: detail.sort((a,b)=>b.rate-a.rate),
+    };
+  }
+
+  // ────────── ④ 종파 배분 ──────────
+  // 레바논: 의석과 직위를 집단별로 고정 할당한다.
+  // 1932년 인구조사 기준으로 만들고, 이후 인구조사를 하지 않았다.
+  initSects(){
+    if(this.sects) return;
+    const NM=['다수 종파','제2 종파','소수 종파 A','소수 종파 B'];
+    // 시민을 종파에 배정 — 심리 좌표 기반이라 정당과 교차한다.
+    // 부족주의가 1.0 근처로 포화되어 있으므로 개방성 사분위로 나눈다.
+    this.sectOf=new Uint8Array(N);
+    const op=[]; for(let i=0;i<N;i++) op.push(this.openness[i]||0.5);
+    const sorted=op.slice().sort((a,b)=>a-b);
+    const q=[sorted[(N*0.38)|0], sorted[(N*0.70)|0], sorted[(N*0.88)|0]];
+    for(let i=0;i<N;i++){
+      const o=op[i];
+      this.sectOf[i] = o<q[0]? 0 : o<q[1]? 1 : o<q[2]? 2 : 3;
+    }
+    // 헌법상 배분(quota)은 '제정 당시의 실제 인구'로 고정한다.
+    // 레바논이 1932년 인구조사를 영구 기준으로 삼은 것과 같다.
+    const cnt=new Array(4).fill(0); let tot=0;
+    for(let i=0;i<N;i++){ if(this.age[i]<18) continue; cnt[this.sectOf[i]]++; tot++; }
+    tot=tot||1;
+    this.sects=NM.map((n,k)=>({
+      key:'s'+k, name:n,
+      quota: cnt[k]/tot,                 // 제정 당시 비중 — 이후 갱신되지 않는다
+      realShare: cnt[k]/tot,
+      axis: k%6,
+    }));
+    this._censusYear=this.year();
+  }
+
+  stepSects(){
+    if(!this.sectOn) return;
+    if(!this.sects) this.initSects();
+    if(this.tick%24!==0) return;
+    // 실제 인구 비중은 계속 변한다. 그러나 헌법상 배분(quota)은 그대로다.
+    const cnt=new Array(this.sects.length).fill(0); let tot=0;
+    for(let i=0;i<N;i+=2){ if(this.age[i]<18) continue; cnt[this.sectOf[i]]++; tot++; }
+    if(!tot) return;
+    let maxGap=0, gapSect=-1;
+    for(let k=0;k<this.sects.length;k++){
+      this.sects[k].realShare=cnt[k]/tot;
+      const gap=Math.abs(this.sects[k].realShare-this.sects[k].quota);
+      if(gap>maxGap){ maxGap=gap; gapSect=k; }
+    }
+    this._sectGap=maxGap;
+    // 괴리가 커지면 불만이 쌓인다 — 과소대표된 종파가 체제를 의심한다
+    if(maxGap>0.08){
+      for(let i=0;i<N;i+=3){
+        const k=this.sectOf[i];
+        if(this.sects[k].realShare > this.sects[k].quota+0.05){
+          this.resentment[i]=clamp(this.resentment[i]+0.004);
+          this.trust[i]=clamp(this.trust[i]-0.003);
+        }
+      }
+      if(maxGap>0.14 && !this._sectCrisisNoted && rnd()<0.06){
+        this._sectCrisisNoted=true;
+        this.pushNews(3,'sev2',
+          `<b>종파 배분 논란</b> — ${this.sects[gapSect].name}의 실제 인구가 배분 기준과 크게 어긋났다`);
+        this.chron('종파 배분 논란');
+        this.S.polarization=clamp(this.S.polarization+6,0,100);
+      }
+    } else this._sectCrisisNoted=false;
+  }
+
+  // 종파 쿼터를 의석에 적용한다 (개표 후 보정)
+  applySectQuota(seatsBy, total){
+    if(!this.sectOn || !this.sects) return seatsBy;
+    // 각 정당의 지지층 종파 구성을 구한다
+    const partySect=new Map();
+    for(let i=0;i<N;i++){
+      const pid=this.party[i]; if(pid<0) continue;
+      if(!partySect.has(pid)) partySect.set(pid, new Array(this.sects.length).fill(0));
+      partySect.get(pid)[this.sectOf[i]]++;
+    }
+    // 종파별 목표 의석
+    const target=this.sects.map(s=>Math.round(total*s.quota));
+    // 현재 종파별 의석 (정당 의석을 지지층 구성비로 환산)
+    const cur=new Array(this.sects.length).fill(0);
+    seatsBy.forEach((n,pid)=>{
+      const comp=partySect.get(pid); if(!comp) return;
+      const t=comp.reduce((a,b)=>a+b,0)||1;
+      for(let k=0;k<cur.length;k++) cur[k]+=n*comp[k]/t;
+    });
+    // 과소 종파를 대표하는 정당에 의석을 옮긴다
+    const out=new Map(seatsBy);
+    for(let k=0;k<this.sects.length;k++){
+      let deficit=Math.round(target[k]-cur[k]);
+      if(deficit<=0) continue;
+      // 그 종파 비중이 높은 정당 순으로 가산, 과대 종파 정당에서 차감
+      const ranked=[...partySect.entries()].map(([pid,comp])=>{
+        const t=comp.reduce((a,b)=>a+b,0)||1;
+        return {pid, share:comp[k]/t};
+      }).sort((a,b)=>b.share-a.share);
+      const donors=[...ranked].reverse();
+      let moved=0;
+      for(const r of ranked){
+        if(moved>=deficit) break;
+        if(r.share<0.25) break;
+        const d=donors.find(x=>(out.get(x.pid)||0)>1 && x.pid!==r.pid);
+        if(!d) break;
+        out.set(d.pid,(out.get(d.pid))-1);
+        out.set(r.pid,(out.get(r.pid)||0)+1);
+        moved++;
+      }
+    }
+    return out;
+  }
+
+  sectStatus(){
+    if(!this.sects) return null;
+    return {
+      on:this.sectOn,
+      censusYear:this._censusYear||0,
+      gap:this._sectGap||0,
+      rows:this.sects.map(s=>({name:s.name, quota:s.quota, real:s.realShare,
+        gap:s.realShare-s.quota})),
+    };
+  }
   // ════════ 블록 단위 정부 구성 ════════
   // 지금까지 정부는 '제1당'에서 시작해 이웃을 포섭하는 방식이었다.
   // 그래서 A140 / B120 / C40 에서 B와 C가 선거연합이어도
@@ -9519,6 +9884,9 @@ class Sim {
         rema.sort((a,b)=>b[1]-a[1]);
         for(let k=0; used<T && rema.length; k=(k+1)%rema.length){ alloc.set(rema[k][0],(alloc.get(rema[k][0])||0)+1); used++; }
       }
+    } else if(C.senate==='VOCATIONAL'){
+      // 직능 상원 — 정당이 아니라 이익집단이 의석을 갖는다
+      alloc=this.electVocationalSenate(T);
     } else if(C.senate==='APPOINTED'){
       // 임명: 집권연합에 가중(현 정부가 채움)
       const gov=this.govCoalition.length?this.govCoalition:[[...this.parties].sort((a,b)=>b.support-a.support)[0]?.id].filter(x=>x!=null);
@@ -11073,10 +11441,26 @@ class Sim {
     }
     const pct=clamp(yes/Math.max(tot,1)*100,0,100);
     const turnout=tot/Math.max(1,this._adultCount());
-    const passed=pct>50;
+    // ── 이중 다수 (스위스형) ──
+    // 국민 과반 + 지역 과반을 모두 넘어야 한다. 인구가 적은 지역이 과대 대표되므로
+    // 국민 다수가 찬성해도 지역에서 막힐 수 있다.
+    let passed=pct>50;
+    let dblInfo=null;
+    if(this.doubleMajority){
+      let rp=0, rc=0;
+      for(let r=0;r<NREG;r++){ if(!regT[r]) continue; rc++; if(regY[r]/regT[r]>0.5) rp++; }
+      const regOK = rc? (rp/rc>0.5) : true;
+      dblInfo={ regionPass:rp, regionTotal:rc, regOK, blocked: passed && !regOK };
+      if(passed && !regOK){
+        passed=false;
+        this.pushNews(4,'sev2',
+          `<b>이중 다수 미달</b> — 국민 찬성 ${pct.toFixed(0)}%였으나 지역 ${rp}/${rc}만 통과해 부결`);
+        this.chron('이중 다수 부결');
+      }
+    }
     // 지역별 결과
     const regRes=regT.map((t,r)=>({r, pct: t? regY[r]/t*100 : 50, t}));
-    const rec={ y:this.year(), label:R.label, pct, turnout:turnout*100, passed,
+    const rec={ y:this.year(), label:R.label, pct, turnout:turnout*100, passed, dbl:dblInfo,
       regions:regRes, groups:{
         young: grpT.young? grpY.young/grpT.young*100:50, old: grpT.old? grpY.old/grpT.old*100:50,
         hiEdu: grpT.hiEdu? grpY.hiEdu/grpT.hiEdu*100:50, loEdu: grpT.loEdu? grpY.loEdu/grpT.loEdu*100:50 },
@@ -11405,6 +11789,14 @@ class Sim {
     }
     this.recomputeStats&&this.recomputeStats();
     if(P.regionalismSeed!==undefined) this.regionalism=P.regionalismSeed;
+    // 인명 문화권 — 프리셋이 지정하지 않으면 라벨의 국기로 추정한다
+    if(P.nameCulture) this.setNameCulture(P.nameCulture);
+    else {
+      const F=String(P.label||'');
+      const M={'🇰🇷':'ko','🇯🇵':'ja','🇺🇸':'en','🇬🇧':'en','🇩🇪':'de','🇫🇷':'fr','🇪🇸':'es',
+               '🇷🇺':'ru','🇮🇹':'es','🇳🇱':'de','🇭🇺':'de','🇹🇷':'ar','🇩🇰':'de','🇮🇱':'ar'};
+      for(const [flag,k] of Object.entries(M)) if(F.startsWith(flag)){ this.setNameCulture(k); break; }
+    }
     // 복수 공천 (일본 중선거구기 재현)
     this.nominationMulti = (P.nominationMulti!==undefined)? P.nominationMulti : null;
     if(P.activistPullSeed!==undefined) this.activistPull=P.activistPullSeed;
@@ -16743,7 +17135,7 @@ const UI={
         <button class="banBtn edit" data-edit="${p.id}" title="편집">✎</button>
         <button class="banBtn split" data-split="${p.id}" title="분당">⑂</button>
         <button class="banBtn" data-ban="${p.id}" title="강제 해산">✕</button>
-        <div class="pstat"><div class="seats">${p.seats}석${senMap? `<span style="font-size:12px;font-weight:600;color:var(--tx2);margin-left:4px;opacity:0.8" title="상원 의석">·${senMap.get(p.id)||0}</span>`:''}${(p.dSeats||p.pSeats)?`<span style="font-size:9.5px;color:var(--tx3)"> 지${p.dSeats||0}·비${p.pSeats||0}</span>`:''}</div><div class="sup">${(p.support*100).toFixed(1)}%</div></div>
+        <div class="pstat"><div class="seats">${p.seats}석${senMap? `<span style="font-size:12px;font-weight:600;color:var(--tx);margin-left:4px" title="상원 의석">·${senMap.get(p.id)||0}</span>`:''}${(p.dSeats||p.pSeats)?`<span style="font-size:9.5px;color:var(--tx3)"> 지${p.dSeats||0}·비${p.pSeats||0}</span>`:''}</div><div class="sup">${(p.support*100).toFixed(1)}%</div></div>
       </div>`;}).join('')
       : '<div class="muted">아직 정당이 없다. 시민 심리가 군집을 이루면 정치 세력이 스스로 태어난다.</div>';
     // 정당 과다 시 접힘 요약 행
@@ -17341,6 +17733,20 @@ window.addEventListener('DOMContentLoaded',()=>{
       UI._scope=b.dataset.scope; paint(); };
     paint();
   }
+  // 인명 문화권 선택
+  {
+    const host=document.getElementById('introName');
+    if(host && UI.sim && UI.sim.nameCultureList){
+      UI._nameCulture = UI._nameCulture || 'ko';
+      const paint=()=>{
+        host.innerHTML = UI.sim.nameCultureList().map(x=>
+          `<button class="cOpt${x.key===UI._nameCulture?' active':''}" data-nc="${x.key}">${x.label}</button>`).join('');
+      };
+      host.onclick=e=>{ const b=e.target.closest('[data-nc]'); if(!b)return;
+        UI._nameCulture=b.dataset.nc; paint(); };
+      paint();
+    }
+  }
   UI._applyScope=(sim)=>{
     const sc=SCOPES[UI._scope||'basic']; if(!sc||!sim) return;
     for(const [k,v] of Object.entries(sc.set)) if(k in sim || true) sim[k]=v;
@@ -17418,6 +17824,7 @@ window.addEventListener('DOMContentLoaded',()=>{
     if(ov)ov.style.display='none';
     UI.sim=new Sim();          // 지역 설정을 반영해 새로 생성
     UI._applyScope && UI._applyScope(UI.sim);
+    if(UI._nameCulture && UI.sim.setNameCulture) UI.sim.setNameCulture(UI._nameCulture);
     // 자원 부존: 슬라이더가 지정값이면 그것을, 자동(-1)이면 지형에서 도출한다
     {
       const rEl=document.getElementById('tnRes');
