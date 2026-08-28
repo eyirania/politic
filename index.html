@@ -16416,8 +16416,29 @@ const UI={
       <button id="poliClose" style="margin-left:auto;background:none;border:1px solid rgba(130,170,255,0.25);color:var(--tx2);border-radius:8px;padding:4px 10px;cursor:pointer;font:inherit">닫기</button></div>
       ${html}</div>`;
     m.style.display='flex';
-    $('#poliClose').onclick=()=>{ m.style.display='none'; };
-    m.onclick=e=>{ if(e.target===m)m.style.display='none'; };
+    // 팝업이 열리면 시간을 멈춘다. 닫을 때는 열기 전 상태로 되돌린다
+    // (정지 중에 열었다면 닫아도 정지를 유지한다).
+    if(!this._modalOpen){ this._modalPrev=this.paused; this._modalOpen=true; }
+    this.paused=true; this.syncSysButtons&&this.syncSysButtons();
+    const close=()=>{
+      m.style.display='none';
+      if(this._modalOpen){ this.paused=this._modalPrev; this._modalOpen=false;
+        this.syncSysButtons&&this.syncSysButtons(); }
+    };
+    $('#poliClose').onclick=close;
+    m.onclick=e=>{ if(e.target===m) close(); };
+    // ESC로도 닫힌다
+    if(!this._modalEsc){
+      this._modalEsc=true;
+      document.addEventListener('keydown', ev=>{
+        if(ev.key==='Escape'){ const mm=$('#poliModal');
+          if(mm && mm.style.display!=='none'){
+            mm.style.display='none';
+            if(this._modalOpen){ this.paused=this._modalPrev; this._modalOpen=false;
+              this.syncSysButtons&&this.syncSysButtons(); }
+          } }
+      });
+    }
   },
   // ── 기록실 ──
   renderHall(){
@@ -16722,7 +16743,7 @@ const UI={
         <button class="banBtn edit" data-edit="${p.id}" title="편집">✎</button>
         <button class="banBtn split" data-split="${p.id}" title="분당">⑂</button>
         <button class="banBtn" data-ban="${p.id}" title="강제 해산">✕</button>
-        <div class="pstat"><div class="seats">${p.seats}석${senMap? `<span style="font-size:10px;color:var(--tx3);margin-left:3px" title="상원">·${senMap.get(p.id)||0}</span>`:''}${(p.dSeats||p.pSeats)?`<span style="font-size:9.5px;color:var(--tx3)"> 지${p.dSeats||0}·비${p.pSeats||0}</span>`:''}</div><div class="sup">${(p.support*100).toFixed(1)}%</div></div>
+        <div class="pstat"><div class="seats">${p.seats}석${senMap? `<span style="font-size:12px;font-weight:600;color:var(--tx2);margin-left:4px;opacity:0.8" title="상원 의석">·${senMap.get(p.id)||0}</span>`:''}${(p.dSeats||p.pSeats)?`<span style="font-size:9.5px;color:var(--tx3)"> 지${p.dSeats||0}·비${p.pSeats||0}</span>`:''}</div><div class="sup">${(p.support*100).toFixed(1)}%</div></div>
       </div>`;}).join('')
       : '<div class="muted">아직 정당이 없다. 시민 심리가 군집을 이루면 정치 세력이 스스로 태어난다.</div>';
     // 정당 과다 시 접힘 요약 행
