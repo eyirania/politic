@@ -10626,6 +10626,27 @@ class Sim {
           const arr2=[...pv.entries()].sort((a,b)=>b[1]-a[1]);
           noteDist(arr2); ST.mag=mag;
           if(arr2.length) recAny(d, arr2, arr2[0][0], mag);
+          // 후보 단위 개표를 선거구 기록에 남긴다.
+          // 지금까지 통계만 집계하고 개별 선거구는 정당 단위로만 보여
+          // "누가 같은 당 후보에게 밀렸는지"를 볼 수 없었다.
+          {
+            const rec=DRall[DRall.length-1];
+            if(rec){
+              const tot=sorted.reduce((a,c)=>a+c.votes,0)||1;
+              const wonSet=new Set();
+              let left=mag;
+              for(const c of sorted){ if(left<=0)break; wonSet.add(c); left--; }
+              rec.multiNom=true;
+              rec.cands=sorted.slice(0, Math.min(12, sorted.length)).map(c=>({
+                pid:c.pid, name:c.name||'', fac:c.facName||'',
+                pct:c.votes/tot*100, won:wonSet.has(c),
+              }));
+              // 동사 상잔 — 같은 당 후보가 마지막 의석을 다퉜는가
+              rec.fratricide = !!(sorted[mag-1] && sorted[mag] && sorted[mag-1].pid===sorted[mag].pid);
+              rec.wipedParties = (res.wiped||[]).map(pid=>{
+                const p=this.parties.find(q=>q.id===pid); return p? p.name : null; }).filter(Boolean);
+            }
+          }
           continue;
         }
         let arr=[...pv.entries()].map(([id,v])=>[id,v*(1+gauss(0,0.04))]).sort((a,b)=>b[1]-a[1]);
@@ -17671,11 +17692,38 @@ Object.assign(UI, {
             <span style="font-size:9.5px;min-width:26px;color:${a.won?'var(--am)':'var(--tx3)'}">${a.won?'당선':'낙선'}</span>
           </div>`; }).join('') + `</div>`;
     }
+    // ── 복수 공천: 후보 단위 개표 ──
+    // 정당 단위로만 보면 "같은 당 후보끼리 표를 나눠 함께 떨어진" 것이 보이지 않는다.
+    let candRows='';
+    if(x.cands && x.cands.length){
+      const byParty=new Map();
+      for(const c of x.cands){ byParty.set(c.pid,(byParty.get(c.pid)||0)+1); }
+      candRows = `<div style="margin-top:10px;border-top:1px solid rgba(130,170,255,0.12);padding-top:8px">
+        <div class="sect">후보별 개표 — 복수 공천</div>`
+      + x.cands.map(c=>{
+          const multi = (byParty.get(c.pid)||0) > 1;   // 같은 당에서 여럿 낸 경우
+          return `<div class="frow">
+            <div class="pdot" style="background:${col(c.pid)}"></div>
+            <span style="min-width:84px;color:var(--tx2)">${nm(c.pid)}${multi?'<span style="color:var(--am)"> ●</span>':''}</span>
+            <span style="font-size:9.5px;color:var(--tx3);min-width:74px">${c.name}</span>
+            <span style="font-size:9px;color:${c.fac?'var(--cy)':'var(--tx3)'};min-width:44px">${c.fac||''}</span>
+            <div class="bar" style="height:7px;max-width:70px">
+              <div style="width:${Math.min(100,c.pct)}%;height:100%;background:${col(c.pid)};opacity:${c.won?1:0.4}"></div></div>
+            <span style="font-family:var(--mono);font-size:10px;min-width:38px;text-align:right">${c.pct.toFixed(1)}%</span>
+            <span style="font-size:9.5px;min-width:26px;color:${c.won?'var(--am)':'var(--tx3)'}">${c.won?'당선':'낙선'}</span>
+          </div>`; }).join('')
+      + (x.fratricide? `<div style="margin-top:6px;padding:6px 9px;border-radius:7px;background:rgba(255,98,98,0.10);border:1px solid rgba(255,98,98,0.32);font-size:10.5px;color:#ff8c8c">
+          <b>동사 상잔</b> — 마지막 의석을 같은 당 후보끼리 다퉜다. 표가 갈려 한쪽이 떨어졌다.</div>`:'')
+      + ((x.wipedParties&&x.wipedParties.length)? `<div style="margin-top:5px;font-size:10.5px;color:var(--rd)">
+          <b>표 분산 실패</b> — ${x.wipedParties.join(', ')}이(가) 여럿 내고 전멸했다.</div>`:'')
+      + `<div class="mut10" style="margin-top:5px">● 표시는 같은 선거구에 복수 공천한 정당</div></div>`;
+    }
     const html=`<div style="font-size:12px;line-height:1.9;color:var(--tx2)">
       <b style="color:var(--tx)">${REGION_NAMES[x.reg]||''}</b> 소속 · 총 투표 ${x.total}표<br>
       ${x.mag>1?'':candLine(x.win, x.wPct, winN, '당선')}
       ${x.mag>1?'':candLine(x.ruId, x.ruPct, ruN, '')}
       ${allRows}
+      ${candRows}
       <div style="margin-top:10px;font-size:11.5px;color:var(--tx3)">격차 ${x.margin.toFixed(2)}%p${x.upset?' · 여론조사 대비 역전 발생':''}</div>
       ${winN?`<div style="margin-top:8px;font-size:10.5px;color:var(--tx3)">공천 방식: ${ {top:'중앙 지명',member:'당원 경선',open:'개방형 예비선거'}[s.con.nomination||'top'] }</div>`:''}
     </div>`;
