@@ -2494,6 +2494,8 @@ class Sim {
     this.constLock = false;
     // 실험 모드 — 가능한 모든 정치체제 조합을 순회한다(관찰용)
     this.ecOn = false;             // 선거인단 (대선)
+    this.duvergerOn = true;        // 뒤베르제 심리적 효과 (사표론)
+    this.duvergerOn = true;        // 뒤베르제 심리적 효과 + 자연 소멸
     this.coattailOn = true;        // 옷자락 효과 (동시선거)
     this.faithlessOn = true;       // 반란표
     this.faithlessOn = true;       // 반란표 (선거인단)
@@ -3190,6 +3192,7 @@ class Sim {
     this.stepPrimaries();
     this.stepScandals();
     this.stepMoney();
+    this.stepPartyDecline();
     this.stepMediaBias();
     this.stepCourt();
     this.stepCompulsory();
@@ -3956,7 +3959,9 @@ class Sim {
     }
     // 블록 응집: 같은 블록 정당끼리 선거 후 연합으로 묶이는 경향(선택적)
   }
-  blocOf(pid){ return this.blocs.find(b=>b.parties.includes(pid)); }
+  // blocOf는 10-bloc.js에 정의돼 있다(빌드 순서상 그쪽이 이긴다).
+  // 여기 있던 동명 함수는 blocs 객체를 반환해 호출부 기대(정당 배열)와
+  // 어긋났으나, 덮어쓰여 실행되지 않아 드러나지 않았다. 제거한다.
   _stepAlliances(){
     const C=this.con;
     // 단순다수계(FPTP/RUNOFF/SNTV)일수록 연합 압력 큼
@@ -3983,7 +3988,17 @@ class Sim {
         // 압력: 좌우가 가까울수록·소선거구계일수록·둘 다 약할수록 연합 동기↑
         const pressure = (districtSys?0.7:(prSys?0.25:0.4)) * (1 - bg/Math.max(MAXLR,0.01)) * (best.support<0.18?1.3:0.7);
         if(pdist<1.9 && rnd()<pressure*0.5){
-          this.formAlliance([p.id,best.id]);
+          // 2당 연합만 만들면 반대 진영이 뭉칠 때 대응할 수 없다.
+          // 이념이 가까운 정당이 더 있으면 함께 묶는다.
+          const pool=[p.id,best.id];
+          for(const q of this.parties){
+            if(q.id<0 || pool.includes(q.id) || taken.has(q.id)) continue;
+            if((q.support||0)<0.02 || (q.support||0)>0.22) continue;
+            const d=Math.min(this.partyDist(p.cent,q), this.partyDist(best.cent,q));
+            if(d<0.55 && rnd()<0.45) pool.push(q.id);
+            if(pool.length>=5) break;
+          }
+          this.formAlliance(pool);
           this.alliances[this.alliances.length-1].auto=true;
           taken.add(p.id); taken.add(best.id);
           break;
@@ -6402,6 +6417,20 @@ class Sim {
   stepFronts(){
     if(!this.frontsOn){ this.fronts=[]; return; }
     if(!this.fronts) this.fronts=[];
+    // 전선은 3당 이상이어야 성립한다. 이탈로 2당이 되면 해체하고
+    // 선거연합 수준으로 내려간다 — 안 그러면 2당 전선과 2당 선거연합이
+    // 구분되지 않아 같은 정당이 두 곳에 잡힌다.
+    this.fronts=this.fronts.filter(f=>{
+      const live=f.members.filter(id=>this.parties.some(p=>p.id===id));
+      f.members=live;
+      if(live.length>=3) return true;
+      if(live.length===2 && this.formAlliance){
+        const taken=new Set((this.alliances||[]).flatMap(a=>a.members));
+        if(!live.some(id=>taken.has(id))) this.formAlliance(live, f.name);
+      }
+      if(live.length) this.pushNews(2,'norm',`<b>${f.name} 해체</b> — 참여 정당이 줄었다`);
+      return false;
+    });
     if(this.tick%12!==0 || this.partyLock) return;
     const T=this.totalSeats;
     const live=this.parties.filter(p=>p.id>=0 && (p.support||0)>0.02);
@@ -6433,6 +6462,16 @@ class Sim {
               target:top.id, color:'#c8a4ff',
               wins:0,
             };
+            // 전선이 결성되면 겹치는 선거연합은 흡수된다.
+            // 같은 정당이 두 연합에 동시에 속하면 의석이 이중 계산된다.
+            if(this.alliances) this.alliances=this.alliances.filter(a=>{
+              const overlap=a.members.filter(id=>f.members.includes(id)).length;
+              if(overlap>=Math.min(2,a.members.length)){
+                this.pushNews(2,'norm',`${a.name}이(가) ${f.name}에 흡수되었다`);
+                return false;
+              }
+              return true;
+            });
             this.fronts.push(f);
             this.pushNews(4,'sev2',`<b>${name} 결성</b> — ${top.name}의 독주에 맞서 ${rest.length}개 정당이 이념을 넘어 손잡았다`);
             this.chron(`${name} 결성 (반${top.name} ${rest.length}당 연합)`);
@@ -9703,9 +9742,9 @@ class Sim {
       (T.mixLink==='mmp'? ' 연동' : T.mixLink==='partial'? ' 부분연동' : ' 병립'));
     const RULE={plurality:'단순다수',runoff:'결선',av:'선호투표',stv:'단기이양',bloc:'집단명부',borda:'보르다'};
     if(T.mode!=='proportional') out.push(RULE[D.rule]||D.rule);
-    if(D.rule==='runoff' && D.runoffMode==='threshold') out.push(`문턱 ${(D.runoffBar*100).toFixed(1)}%`);
-    if(D.nomination==='multi') out.push('복수공천');
-    if(D.anbun) out.push('안분표');
+    if(T.mode!=='proportional' && D.rule==='runoff' && D.runoffMode==='threshold') out.push(`문턱 ${(D.runoffBar*100).toFixed(1)}%`);
+    if(T.mode!=='proportional' && D.nomination==='multi') out.push('복수공천');
+    if(T.mode!=='proportional' && D.anbun) out.push('안분표');
     if(T.mode!=='district'){
       const F={hare:'헤어',droop:'드룹',dhondt:'동트',sainte:'생라게',msainte:'수정생라게'};
       out.push(F[P.formula]||P.formula);
@@ -9777,6 +9816,41 @@ class Sim {
       .sort((a,b)=>a.mag-b.mag);
     out.byParty=[...out.byParty.values()]
       .sort((a,b)=>(b.small+b.medium+b.large+b.prop)-(a.small+a.medium+a.large+a.prop));
+    // 원천별 정당 구성 — "이 경로로 들어온 의석은 어느 정당의 것인가"
+    out.bySource=[];
+    {
+      const push=(name,color,getter)=>{
+        const rows=out.byParty.map(r=>({name:r.name, color:r.color, seats:getter(r)}))
+          .filter(r=>r.seats>0).sort((a,b)=>b.seats-a.seats);
+        const tot=rows.reduce((a,r)=>a+r.seats,0);
+        if(tot>0) out.bySource.push({name, color, seats:tot, parties:rows});
+      };
+      for(const g of out.byMag){
+        if(g.mag===1) push('소선거구','#5b9bd5',r=>r.small);
+        else if(g.mag<=5) push('중선거구','#4ea94b',r=>r.medium);
+        else push('대선거구','#e8a33d',r=>r.large);
+      }
+      push('비례대표','#a06cd5',r=>r.prop);
+      // 특별 블록은 자체 배분 내역을 쓴다
+      const R2=this._sysLastRun;
+      if(R2){
+        if(R2.reserved) out.bySource.push({name:'유보 의석', color:'#e26d9c', seats:R2.reserved.total,
+          parties:R2.reserved.rows.map(x=>{ const p=this.parties.find(q=>q.id===x.pid);
+            return {name:(p?p.name:'?')+` (${x.group})`, color:p?p.color:'#888', seats:x.seats}; })});
+        if(R2.diaspora) out.bySource.push({name:'재외국민', color:'#2eb8b8', seats:R2.diaspora.total,
+          parties:R2.diaspora.rows.map(x=>{ const p=this.parties.find(q=>q.id===x.pid);
+            return {name:p?p.name:'?', color:p?p.color:'#888', seats:x.seats}; })});
+        if(R2.functional) out.bySource.push({name:'기능별', color:'#c9a227', seats:R2.functional.total,
+          parties:R2.functional.rows.map(x=>{ const p=this.parties.find(q=>q.id===x.pid);
+            return {name:(p?p.name:'?')+` (${x.panel})`, color:p?p.color:'#888', seats:x.seats}; })});
+        if(R2.bonus && (R2.bonus.bonus||R2.bonus.applied)){
+          const p=this.parties.find(q=>q.id===R2.bonus.to);
+          out.bySource.push({name:'다수당 보너스', color:'#ff8c42', seats:R2.bonus.bonus||R2.bonus.applied,
+            parties:[{name:p?p.name:'제1당', color:p?p.color:'#888', seats:R2.bonus.bonus||R2.bonus.applied}]});
+        }
+      }
+    }
+
     return out;
   }
   // ════════ 인명 문화권 ════════
@@ -11969,6 +12043,260 @@ class Sim {
       malapp: this._malapp||1,
     };
   }
+  // ════════ 뒤베르제 법칙 ════════
+  //
+  // 실측에서 소선거구 300석인데 정당이 30개였다. 의석은 수렴했으나
+  // (ENP 1.53) 정당 수는 줄지 않았다.
+  //
+  // 원인은 두 가지였다:
+  //   ① 자연 소멸 로직이 아예 없었다. 정당은 흡수 합당으로만 사라졌다.
+  //   ② lowStreak이 초기화만 되고 증가하지 않는 죽은 변수였다.
+  //
+  // 뒤베르제 법칙은 기계적 효과(의석 배분)와 심리적 효과(전략 투표)로
+  // 이루어진다. 기계적 효과는 작동했으나 심리적 효과가 빠져 있었다.
+
+  // ── 심리적 효과: 당선 가능성이 없으면 표가 떠난다 ──
+  // 선거구 정수가 작을수록 강하게 작동한다.
+  duvergerPenalty(p){
+    if(!this.duvergerOn || !p || p.id<0) return 0;
+    const S=this.readSystem? this.readSystem() : null;
+    if(!S) return 0;
+    // 유효 정수 — 비례 비중이 클수록 사표 걱정이 준다
+    const mode=S.tier.mode;
+    let M;
+    if(mode==='proportional') M=this.totalSeats*0.5;
+    else if(mode==='mixed'){
+      const dm=S.dist.mag||1;
+      M = dm*(S.tier.districtShare??0.6) + this.totalSeats*0.3*(1-(S.tier.districtShare??0.6));
+    } else M=S.dist.mag||1;
+    // 봉쇄조항도 심리적 문턱이다
+    const bar=(S.prop.threshold||0)/100;
+    // 당선에 필요한 대략의 득표(드룹 근사)
+    const need = Math.max(bar, 1/(M+1));
+    const sup = p.support||0;
+    if(sup >= need*1.35) return 0;                 // 충분히 넘으면 무압력
+    // 문턱에 못 미칠수록 페널티. 정수가 작을수록 가파르다.
+    const short = clamp((need*1.35 - sup)/(need*1.35), 0, 1);
+    // 비례제에서도 봉쇄조항이 심리적 문턱으로 작동해야 한다.
+    // 하한이 없으면 steep가 0.008이 되어 군소정당이 무한 증식한다(ENP 16).
+    const steep = clamp(1.15/(M+0.5), 0.30, 0.95);
+    return short*short*steep;
+  }
+
+  // ── 자연 소멸 ──
+  stepPartyDecline(){
+    if(!this.duvergerOn) return;
+    if(this.tick%12!==0) return;
+    const T=this.totalSeats;
+    const S=this.readSystem? this.readSystem() : null;
+    const propish = S && (S.tier.mode==='proportional' ||
+      (S.tier.mode==='mixed' && (S.tier.districtShare??0.6)<0.45));
+
+    // ── 과밀 압력 ──
+    // 비례제라도 정당이 무한히 늘지는 않는다. 유권자의 인지 한계와
+    // 연정 협상 비용이 통합을 강제한다(사르토리의 '분극적 다당제' 한계).
+    const alive=this.parties.filter(q=>q.id>=0);
+    const crowd = clamp((alive.length-9)/12, 0, 1);   // 9개 넘으면 압력 시작
+
+    for(const p of this.parties){
+      if(p.id<0) continue;
+      if(p.lowStreak===undefined) p.lowStreak=0;
+      const sup=p.support||0, share=(p.seats||0)/T;
+      // 실패 판정 — 의석이 없거나, 득표에 비해 의석이 턱없이 적다
+      // 지역 기반 정당은 전국 지지가 낮아도 살아남는다(스코틀랜드 SNP형)
+      const regional = p.regAff && Math.max(...p.regAff)>0.45;
+      // 과밀할수록 살아남는 문턱이 올라간다
+      const bar0 = 0.11 + crowd*0.06;
+      const bar1 = 0.06 + crowd*0.05;
+      // 비례제에서는 share ≈ sup이라 '득표 대비 손해' 조건이 결코 걸리지 않는다.
+      // 절대 규모로도 판정해야 한다 — 20당 체제에서 3%는 주변 정당이다.
+      const tiny = sup < (0.045 + crowd*0.055);
+      const failing = (p.seats||0)===0
+        ? (sup<bar0 && !regional)
+        : ((tiny || (share < sup*0.30 && sup<bar1)) && !regional);
+      if(failing) p.lowStreak++;
+      else p.lowStreak=Math.max(0, p.lowStreak-2);
+
+      // 소멸 — 연속 실패가 쌓이면 해산한다.
+      // 비례제에서는 군소정당이 살아남을 수 있으므로 문턱을 높인다.
+      const limit = Math.max(3, Math.round((propish? 7 : 4) - crowd*3));
+      if(p.lowStreak>=limit && this.parties.filter(q=>q.id>=0).length>2){
+        this.dissolveParty(p, '지지 기반 상실');
+        continue;
+      }
+      // 조기 경고
+      if(p.lowStreak===limit-1 && (p.seats||0)===0)
+        this.pushNews(2,'norm', `<b>${p.name}</b>, 해산 위기 — 원내 진입에 거듭 실패했다`);
+    }
+  }
+
+  // 해산 — 지지자는 가장 가까운 정당으로 간다(탄압과 달리 원한이 남지 않는다)
+  dissolveParty(p, why){
+    if(!p || p.id<0) return;
+    const alive=this.parties.filter(q=>q.id>=0 && q!==p);
+    if(alive.length<2) return;
+    // 이념이 가장 가까운 정당
+    let heir=null, bd=1e9;
+    for(const q of alive){
+      const d=this.partyDist(p.cent, q);
+      if(d<bd){ bd=d; heir=q; }
+    }
+    let moved=0;
+    for(let i=0;i<N;i++){
+      if(this.party[i]!==p.id) continue;
+      // 가까운 정당이 있으면 넘어가고, 멀면 무당층이 된다
+      if(heir && bd<1.4 && rnd()<0.62){ this.party[i]=heir.id; moved++; }
+      else this.party[i]=-1;
+      this.trust[i]=clamp(this.trust[i]-0.02);
+    }
+    const lg=(this.partyLog||[]).find(l=>l.pid===p.id && !l.died);
+    if(lg) lg.died=this.year();
+    if(heir){
+      if(!heir.absorbed) heir.absorbed=[];
+      heir.absorbed.push({name:p.name, y:this.year(), seats:p.seats||0, founded:p.founded});
+    }
+    this.parties.splice(this.parties.indexOf(p),1);
+    this.govCoalition=this.govCoalition.filter(g=>g!==p.id);
+    if(this.alliances) for(const a of this.alliances) a.members=a.members.filter(m=>m!==p.id);
+    this.pushNews(2,'norm',
+      `<b>${p.name} 해산</b> — ${why}${heir&&moved? `. 지지자 상당수가 ${heir.name}으로 옮겨갔다`:''}`);
+    this.chron(`${p.name} 해산`);
+  }
+
+  duvergerStatus(){
+    if(!this.duvergerOn) return null;
+    return this.parties.filter(p=>p.id>=0).map(p=>({
+      name:p.name, color:p.color, seats:p.seats||0, support:p.support||0,
+      penalty:this.duvergerPenalty(p), streak:p.lowStreak||0,
+    })).sort((a,b)=>b.support-a.support);
+  }
+  // ════════ 뒤베르제 법칙 ════════
+  //
+  // 실측에서 소선거구 300석인데 정당이 30개였다. 의석은 수렴했으나
+  // (ENP 1.53) 정당 수는 줄지 않았다.
+  //
+  // 원인은 두 가지였다:
+  //   ① 자연 소멸 로직이 아예 없었다. 정당은 흡수 합당으로만 사라졌다.
+  //   ② lowStreak이 초기화만 되고 증가하지 않는 죽은 변수였다.
+  //
+  // 뒤베르제 법칙은 기계적 효과(의석 배분)와 심리적 효과(전략 투표)로
+  // 이루어진다. 기계적 효과는 작동했으나 심리적 효과가 빠져 있었다.
+
+  // ── 심리적 효과: 당선 가능성이 없으면 표가 떠난다 ──
+  // 선거구 정수가 작을수록 강하게 작동한다.
+  duvergerPenalty(p){
+    if(!this.duvergerOn || !p || p.id<0) return 0;
+    const S=this.readSystem? this.readSystem() : null;
+    if(!S) return 0;
+    // 유효 정수 — 비례 비중이 클수록 사표 걱정이 준다
+    const mode=S.tier.mode;
+    let M;
+    if(mode==='proportional') M=this.totalSeats*0.5;
+    else if(mode==='mixed'){
+      const dm=S.dist.mag||1;
+      M = dm*(S.tier.districtShare??0.6) + this.totalSeats*0.3*(1-(S.tier.districtShare??0.6));
+    } else M=S.dist.mag||1;
+    // 봉쇄조항도 심리적 문턱이다
+    const bar=(S.prop.threshold||0)/100;
+    // 당선에 필요한 대략의 득표(드룹 근사)
+    const need = Math.max(bar, 1/(M+1));
+    const sup = p.support||0;
+    if(sup >= need*1.35) return 0;                 // 충분히 넘으면 무압력
+    // 문턱에 못 미칠수록 페널티. 정수가 작을수록 가파르다.
+    const short = clamp((need*1.35 - sup)/(need*1.35), 0, 1);
+    // 비례제에서도 봉쇄조항이 심리적 문턱으로 작동해야 한다.
+    // 하한이 없으면 steep가 0.008이 되어 군소정당이 무한 증식한다(ENP 16).
+    const steep = clamp(1.15/(M+0.5), 0.30, 0.95);
+    return short*short*steep;
+  }
+
+  // ── 자연 소멸 ──
+  stepPartyDecline(){
+    if(!this.duvergerOn) return;
+    if(this.tick%12!==0) return;
+    const T=this.totalSeats;
+    const S=this.readSystem? this.readSystem() : null;
+    const propish = S && (S.tier.mode==='proportional' ||
+      (S.tier.mode==='mixed' && (S.tier.districtShare??0.6)<0.45));
+
+    // ── 과밀 압력 ──
+    // 비례제라도 정당이 무한히 늘지는 않는다. 유권자의 인지 한계와
+    // 연정 협상 비용이 통합을 강제한다(사르토리의 '분극적 다당제' 한계).
+    const alive=this.parties.filter(q=>q.id>=0);
+    const crowd = clamp((alive.length-9)/12, 0, 1);   // 9개 넘으면 압력 시작
+
+    for(const p of this.parties){
+      if(p.id<0) continue;
+      if(p.lowStreak===undefined) p.lowStreak=0;
+      const sup=p.support||0, share=(p.seats||0)/T;
+      // 실패 판정 — 의석이 없거나, 득표에 비해 의석이 턱없이 적다
+      // 지역 기반 정당은 전국 지지가 낮아도 살아남는다(스코틀랜드 SNP형)
+      const regional = p.regAff && Math.max(...p.regAff)>0.45;
+      // 과밀할수록 살아남는 문턱이 올라간다
+      const bar0 = 0.11 + crowd*0.06;
+      const bar1 = 0.06 + crowd*0.05;
+      // 비례제에서는 share ≈ sup이라 '득표 대비 손해' 조건이 결코 걸리지 않는다.
+      // 절대 규모로도 판정해야 한다 — 20당 체제에서 3%는 주변 정당이다.
+      const tiny = sup < (0.045 + crowd*0.055);
+      const failing = (p.seats||0)===0
+        ? (sup<bar0 && !regional)
+        : ((tiny || (share < sup*0.30 && sup<bar1)) && !regional);
+      if(failing) p.lowStreak++;
+      else p.lowStreak=Math.max(0, p.lowStreak-2);
+
+      // 소멸 — 연속 실패가 쌓이면 해산한다.
+      // 비례제에서는 군소정당이 살아남을 수 있으므로 문턱을 높인다.
+      const limit = Math.max(3, Math.round((propish? 7 : 4) - crowd*3));
+      if(p.lowStreak>=limit && this.parties.filter(q=>q.id>=0).length>2){
+        this.dissolveParty(p, '지지 기반 상실');
+        continue;
+      }
+      // 조기 경고
+      if(p.lowStreak===limit-1 && (p.seats||0)===0)
+        this.pushNews(2,'norm', `<b>${p.name}</b>, 해산 위기 — 원내 진입에 거듭 실패했다`);
+    }
+  }
+
+  // 해산 — 지지자는 가장 가까운 정당으로 간다(탄압과 달리 원한이 남지 않는다)
+  dissolveParty(p, why){
+    if(!p || p.id<0) return;
+    const alive=this.parties.filter(q=>q.id>=0 && q!==p);
+    if(alive.length<2) return;
+    // 이념이 가장 가까운 정당
+    let heir=null, bd=1e9;
+    for(const q of alive){
+      const d=this.partyDist(p.cent, q);
+      if(d<bd){ bd=d; heir=q; }
+    }
+    let moved=0;
+    for(let i=0;i<N;i++){
+      if(this.party[i]!==p.id) continue;
+      // 가까운 정당이 있으면 넘어가고, 멀면 무당층이 된다
+      if(heir && bd<1.4 && rnd()<0.62){ this.party[i]=heir.id; moved++; }
+      else this.party[i]=-1;
+      this.trust[i]=clamp(this.trust[i]-0.02);
+    }
+    const lg=(this.partyLog||[]).find(l=>l.pid===p.id && !l.died);
+    if(lg) lg.died=this.year();
+    if(heir){
+      if(!heir.absorbed) heir.absorbed=[];
+      heir.absorbed.push({name:p.name, y:this.year(), seats:p.seats||0, founded:p.founded});
+    }
+    this.parties.splice(this.parties.indexOf(p),1);
+    this.govCoalition=this.govCoalition.filter(g=>g!==p.id);
+    if(this.alliances) for(const a of this.alliances) a.members=a.members.filter(m=>m!==p.id);
+    this.pushNews(2,'norm',
+      `<b>${p.name} 해산</b> — ${why}${heir&&moved? `. 지지자 상당수가 ${heir.name}으로 옮겨갔다`:''}`);
+    this.chron(`${p.name} 해산`);
+  }
+
+  duvergerStatus(){
+    if(!this.duvergerOn) return null;
+    return this.parties.filter(p=>p.id>=0).map(p=>({
+      name:p.name, color:p.color, seats:p.seats||0, support:p.support||0,
+      penalty:this.duvergerPenalty(p), streak:p.lowStreak||0,
+    })).sort((a,b)=>b.support-a.support);
+  }
   // ════════ 선거인단 · 의무투표 ════════
 
   // ⑧ 선거인단 (미국형) — 연방 주(region)를 그대로 쓴다
@@ -12207,6 +12535,53 @@ class Sim {
       }
     }
   }
+
+  // ── 연합 통합 API ──
+  // 선거연합(alliances)과 전선(fronts)은 구조가 같은데 배열이 따로였다.
+  // 결속 강도만 다른 같은 현상이므로 하나로 보여준다.
+  //   electoral — 느슨한 선거연합. 선거구 조정·단일화 수준
+  //   front     — 광역 전선. 지배 정당에 맞선 이념 초월 연합
+  allBlocs(){
+    const out=[];
+    const inFront=new Set();
+    for(const f of (this.fronts||[])) for(const id of f.members) inFront.add(id);
+    for(const a of (this.alliances||[])){
+      // 전선에 이미 속한 정당만으로 이루어진 선거연합은 건너뛴다(이중 계산 방지)
+      if(a.members.every(id=>inFront.has(id))) continue;
+      out.push({ id:'a'+a.id, tier:'electoral', name:a.name, color:a.color||'#7aa2ff',
+        members:a.members.slice(), cohesion:a.cohesion??0.35, born:a.born||a.since||0,
+        target:null, raw:a });
+    }
+    for(const f of (this.fronts||[])){
+      out.push({ id:'f'+f.id, tier:'front', name:f.name, color:f.color||'#c8a4ff',
+        members:f.members.slice(), cohesion:f.cohesion??0.5, born:f.born||0,
+        target:f.target??null, kind:f.kind, wins:f.wins||0, raw:f });
+    }
+    // 최종 중복 제거 — 앞선 연합에 이미 잡힌 정당은 뺀다.
+    // 전선을 먼저 처리하므로 강한 결속이 우선한다.
+    {
+      const seen=new Set();
+      for(const b of out.slice().sort((x,y)=>(x.tier==='front'?0:1)-(y.tier==='front'?0:1))){
+        b.members=b.members.filter(id=>{ if(seen.has(id)) return false; seen.add(id); return true; });
+      }
+      for(let i=out.length-1;i>=0;i--) if(out[i].members.length<2) out.splice(i,1);
+    }
+    // 의석 합계와 정당 정보를 붙인다
+    for(const b of out){
+      b.parties=b.members.map(id=>this.parties.find(p=>p.id===id)).filter(Boolean);
+      b.seats=b.parties.reduce((a,p)=>a+(p.seats||0),0);
+      b.support=b.parties.reduce((a,p)=>a+(p.support||0),0);
+      b.inGov=b.members.some(id=>this.govCoalition.includes(id));
+    }
+    return out.sort((a,b)=>b.seats-a.seats);
+  }
+  // 한 정당이 속한 연합(강한 쪽 우선)
+  blocFor(pid){
+    const all=this.allBlocs();
+    return all.find(b=>b.tier==='front' && b.members.includes(pid))
+        || all.find(b=>b.members.includes(pid)) || null;
+  }
+  blocStatus(){ return this.allBlocs(); }
   assignDistricts(nd){
     // 유권자 대비 선거구가 너무 많으면 선거구당 표본이 무너진다(300석에 성인 1900명 → 6명).
     // 표본이 작을수록 무작위 흔들림이 커지므로, 그 정도를 기록해 두었다가
@@ -13469,6 +13844,8 @@ class Sim {
         pollRun:(this._pollRun||[]).slice(),
         // 제도 요약 + 의석 경로 — 어떤 경로로 의석을 얻었는가
         sysSummary: this.systemSummary? this.systemSummary() : null,
+        seatSources: this.seatPathStatus? (()=>{ const SP=this.seatPathStatus();
+          return {bySource:SP.bySource, byMag:SP.byMag, total:SP.total, mixed:SP.mixed}; })() : null,
         seatPaths: (()=>{
           const R=this._sysLastRun;
           const rows=this.parties.filter(p=>p.id>=0 && (p.seats||0)>0).map(p=>({
@@ -13660,6 +14037,12 @@ class Sim {
           u += this.regionalism * p.regAff[this.region[i]] * 2.2 * (0.6+this.tribalism[i]*0.8); // 우리 지역의 당
         if(p.home===this.region[i]) u += 0.08*(0.4+this.tribalism[i]);   // 지역주의: 거점 지역 결집
         u += Math.sqrt(p.support)*0.45*(0.5+this.conformity[i]);   // 밴드왜건(당선 가능성·동조)
+        // 뒤베르제 심리적 효과 — 당선 가능성이 없으면 표가 떠난다.
+        // 선거구 정수가 작을수록 강하다. 열성 지지자(충성·급진)는 덜 흔들린다.
+        if(this.duvergerOn){
+          const dp=this.duvergerPenalty(p);
+          if(dp>0) u -= dp*1.15*(1.25-this.loyalty[i]*0.55-this.radical[i]*0.35);
+        }
         // 옷자락 효과 — 동시선거에서 대통령 정당이 끌어올려진다
         if(this.coattailBonus) u += this.coattailBonus(p.id)*(0.6+this.conformity[i]*0.7);
         // 인지도 — 돈을 쓴 만큼 알려진다. 정치 관심이 낮을수록 크게 작용한다.
@@ -17457,7 +17840,7 @@ Object.assign(UI, {
       const arr=[...s.senate].map(x=>({...x, p:s.parties.find(q=>q.id===x.id)})).filter(x=>x.p)
         .sort((a,b)=>s.lr(a.p.cent)-s.lr(b.p.cent));
       const dots=[]; arr.forEach(x=>{ for(let i=0;i<x.seats;i++)dots.push(x.p.color); });
-      const cx=200, cy=62, rIn=16, rOut=56;   // 상원은 하원보다 작게 그린다
+      const cx=200, cy=46, rIn=11, rOut=41;   // 상원은 하원보다 훨씬 작게
       // 행 수도 의석에 맞춘다. 20석에 3행이면 한 행에 7개가 흩어져 성기다.
       const SR=Math.max(2, Math.min(11, Math.round(Math.sqrt(senT/2.2)))), sGap=(rOut-rIn)/Math.max(1,SR-1);
       const sRad=[]; let sRadSum=0;
@@ -17469,7 +17852,7 @@ Object.assign(UI, {
       let sMin=1e9; for(let r=0;r<SR;r++){ const arc=pr[r]>1?(Math.PI*sRad[r])/(pr[r]-1):Math.PI*sRad[r]; if(arc<sMin)sMin=arc; }
       // 점 크기 상한을 의석 수에 반비례시킨다.
       // 3.6 고정이면 20석과 100석의 점이 같은 크기로 보여 규모 차이가 사라진다.
-      const sCap = senT<=30? 5.2 : senT<=60? 4.4 : senT<=120? 3.6 : senT<=250? 3.0 : 2.6;
+      const sCap = senT<=30? 3.8 : senT<=60? 3.2 : senT<=120? 2.6 : senT<=250? 2.2 : 1.9;
       const sDot=Math.max(1.1, Math.min(sCap, Math.min(sMin,sGap)*0.40));
       const pos=[];
       for(let r=0;r<SR;r++){ const rad=sRad[r], n=pr[r];
@@ -18671,12 +19054,22 @@ Object.assign(UI, {
       html+='<div style="display:flex;height:16px;border-radius:4px;overflow:hidden;margin-bottom:6px">'
         + src.map(x=>`<span style="flex:${x.seats};background:${x.color}" title="${x.name} ${x.seats}석 (${pc(x.seats)})"></span>`).join('')
         + '</div>';
-      html+=src.map(x=>`<div class="frow" style="font-size:10.5px;padding:2px 0">
+      // 각 원천이 어느 정당에게 갔는가 — 같은 300석도 경로마다 주인이 다르다
+      const comp=new Map();
+      for(const b of (SP.bySource||[])) comp.set(b.name, b.parties);
+      html+=src.map(x=>{
+        const ps=comp.get(x.name);
+        const bar = ps&&ps.length? `<div style="display:flex;height:6px;border-radius:3px;overflow:hidden;margin:2px 0 4px 13px">
+            ${ps.map(p=>`<span style="flex:${p.seats};background:${p.color}" title="${p.name} ${p.seats}석 (${(p.seats/x.seats*100).toFixed(0)}%)"></span>`).join('')}
+          </div>
+          <div class="mut" style="font-size:9px;margin:0 0 5px 13px">
+            ${ps.slice(0,3).map(p=>`${p.name} ${(p.seats/x.seats*100).toFixed(0)}%`).join(' · ')}${ps.length>3?` 외 ${ps.length-3}`:''}</div>` : '';
+        return `<div class="frow" style="font-size:10.5px;padding:2px 0">
           <span style="width:9px;height:9px;border-radius:2px;background:${x.color}"></span>
           <span style="flex:1;color:var(--tx2)">${x.name}</span>
           <span class="mono3" style="min-width:40px;text-align:right">${x.seats}석</span>
           <span class="mono3" style="min-width:48px;text-align:right;color:var(--cy)">${pc(x.seats)}</span>
-        </div>`).join('');
+        </div>` + bar; }).join('');
       html+=`<div class="mut10" style="margin-top:3px">전체 ${T}석 기준</div>`;
     }
 
@@ -18699,7 +19092,8 @@ Object.assign(UI, {
     // 정당별 경로
     if(SP.byParty.length){
       html+='<div class="sect2" style="margin-top:9px">정당별 획득 경로</div>';
-      const mx=Math.max(...SP.byParty.map(r=>r.small+r.medium+r.large+r.prop),1);
+      // 막대 폭을 최다 정당 대비로 두면 1위가 늘 100%가 되어
+      // 옆에 적힌 의석률(35.3%)과 어긋나 보인다. 전체 의석 대비로 맞춘다.
       html+=SP.byParty.slice(0,10).map(r=>{
         const tot=r.small+r.medium+r.large+r.prop;
         const seg=(v,c,t)=>v>0? `<span style="flex:${v};background:${c}" title="${t} ${v}석"></span>`:'';
@@ -18711,7 +19105,7 @@ Object.assign(UI, {
             <span class="mono3" style="min-width:30px;text-align:right">${tot}</span>
             <span class="mono3" style="min-width:42px;text-align:right;color:var(--cy)">${pc(tot)}</span>
           </div>
-          <div style="display:flex;height:7px;border-radius:3px;overflow:hidden;margin-top:2px;width:${(tot/mx*100).toFixed(0)}%">
+          <div style="display:flex;height:7px;border-radius:3px;overflow:hidden;margin-top:2px;width:${(tot/T*100).toFixed(1)}%">
             ${seg(r.small,COL.small,'소선거구')}${seg(r.medium,COL.medium,'중선거구')}${seg(r.large,COL.large,'대선거구')}${seg(r.prop,COL.prop,'비례')}
           </div></div>`; }).join('');
       html+=`<div class="mut10" style="margin-top:4px">
@@ -20457,6 +20851,34 @@ Object.assign(UI, {
       else if(dTot&&pTot) pathSec+=`<p>전체 의석의 ${(dTot/(dTot+pTot)*100).toFixed(0)}%가 지역구에서, ${(pTot/(dTot+pTot)*100).toFixed(0)}%가 비례대표로 채워졌다.</p>`;
     }
 
+    // ── 원천별 정당 구성 ──
+    // 같은 300석도 어떤 경로로 왔느냐에 따라 주인이 다르다.
+    let srcSec='';
+    if(rec.seatSources && rec.seatSources.bySource && rec.seatSources.bySource.length>1){
+      const SS=rec.seatSources, TT=SS.total||1;
+      srcSec=`<h2>원천별 정당 구성</h2>
+        <table class="wkT"><thead><tr><th style="text-align:left">원천</th><th>의석</th><th>비중</th><th style="text-align:left">정당 구성</th></tr></thead><tbody>`
+        + SS.bySource.map(x=>`<tr>
+            <td><span class="swatch" style="background:${x.color}"></span>${x.name}</td>
+            <td class="num">${x.seats}</td>
+            <td class="num">${(x.seats/TT*100).toFixed(1)}%</td>
+            <td><div style="display:flex;height:8px;border-radius:3px;overflow:hidden;min-width:90px;margin-bottom:2px">
+                ${x.parties.map(p=>`<span style="flex:${p.seats};background:${p.color}" title="${p.name} ${p.seats}"></span>`).join('')}
+              </div>
+              <span class="mut" style="font-size:10px">${x.parties.slice(0,3).map(p=>`${p.name} ${(p.seats/x.seats*100).toFixed(0)}%`).join(' · ')}</span></td>
+          </tr>`).join('')
+        + '</tbody></table>';
+      // 경로별 승자가 다른가
+      const winners=SS.bySource.map(x=>({src:x.name, top:x.parties[0]})).filter(x=>x.top);
+      // "기독교민주당 (청년)" 같은 꼬리표를 떼고 비교해야 한다
+      const base=n=>n.replace(/\s*\([^)]*\)\s*$/,'');
+      const uniq=[...new Set(winners.map(w=>base(w.top.name)))];
+      srcSec+=`<p>${uniq.length===1
+        ? `모든 경로에서 <b>${uniq[0]}</b>이 최다 의석을 얻었다. 제도가 어느 쪽이든 결과가 같았다는 뜻이다.`
+        : `경로마다 승자가 갈렸다 — ${winners.slice(0,3).map(w=>`${w.src}에서는 <b>${base(w.top.name)}</b>`).join(', ')}. 같은 유권자라도 어떤 경로로 의석을 배분하느냐가 결과를 바꾼다.`}
+        ${SS.mixed? ' 도시(중선거구)와 지방(소선거구)이 다른 정당을 뽑았다면 그 격차가 여기 드러난다.' : ''}</p>`;
+    }
+
     // ── 시대 배경 ──
     // 선거는 진공에서 치러지지 않는다. 무엇이 유권자를 움직였는가.
     let bgSec='';
@@ -20925,7 +21347,7 @@ Object.assign(UI, {
       ${box}
       <h1>${rec.y}년 ${s.country} 총선${elName?` — ${elName}`:''}</h1>
       <div class="wkLead">${METHODNAME[rec.method]||rec.method} · ${num(T)}석 · 투표율 ${pct(rec.turnout)}</div>
-      ${lead}${sysSec}${bgSec}${pollSec}${exitSec}${table}${pathSec}${analysis}${splitSec}${regSec}${dist}${senSec}${envSec}${socSec}${govSec}${peopleSec}${cfSec}${aftSec}${legacySec}${trivSec}
+      ${lead}${sysSec}${bgSec}${pollSec}${exitSec}${table}${pathSec}${srcSec}${analysis}${splitSec}${regSec}${dist}${senSec}${envSec}${socSec}${govSec}${peopleSec}${cfSec}${aftSec}${legacySec}${trivSec}
       <div class="wkRef">이 문서는 시뮬레이션 결과로 자동 생성되었다. 수치는 개표 기록에서 직접 산출한 값이다.</div>
     </div>`;
     if(toHTML) return HTML;
@@ -22079,8 +22501,10 @@ Object.assign(UI, {
         { const c=$('#sysSweep'); if(c) c.checked=!!S.prop.apparSweep; }
         // 조건부 표시
         const vis=(sel,on)=>document.querySelectorAll(sel).forEach(e=>e.style.display=on?'':'none');
-        vis('.sysRoN', (S.dist.runoffMode||'topN')==='topN');
-        vis('.sysRoBar', S.dist.runoffMode==='threshold');
+        const isProp = S.tier.mode==='proportional';
+        vis('.sysDist', !isProp);          // 비례제에는 지역구 층위가 없다
+        vis('.sysRoN', !isProp && (S.dist.runoffMode||'topN')==='topN');
+        vis('.sysRoBar', !isProp && S.dist.runoffMode==='threshold');
         vis('.sysPana', S.prop.list==='panachage');
         vis('.sysAppaSub', !!S.prop.apparentement);
         vis('.sysBonusSub', S.adj.bonus && S.adj.bonus!=='none');
