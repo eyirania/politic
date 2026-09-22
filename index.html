@@ -480,7 +480,7 @@ canvas.chart.tall{height:210px}
       <div id="introTerrain" style="display:none;margin-top:11px">
         <div style="display:flex;align-items:center;gap:9px;font-size:11px;color:#b8c4e0;margin-bottom:7px">
           <span style="min-width:52px">지역 수</span>
-          <input type="range" id="tnCount" min="6" max="20" step="1" value="12" style="flex:1;accent-color:#54e0ff">
+          <input type="range" id="tnCount" min="6" max="50" step="1" value="12" style="flex:1;accent-color:#54e0ff">
           <span id="tnCountV" style="font-family:ui-monospace,monospace;font-size:11px;min-width:24px;text-align:right">12</span>
         </div>
         <div style="display:flex;align-items:center;gap:9px;font-size:11px;color:#b8c4e0;margin-bottom:7px">
@@ -1383,7 +1383,40 @@ const REAL_REGION_NAMES = {
   israel: ['텔아비브 지구','하이파 지구','북부 지구','중부 지구','남부 지구','예루살렘 지구','유대사마리아 지구','네게브','골란고원','갈릴리','샤론 평야','네게브 사막'],
   swiss:  ['취리히주','그라우뷘덴주','발레주','베른주','제네바주','티치노주','우리주','유라주','바젤슈타트주','슈비츠주','보주','아펜첼주'],
 };
+// ── 미국 50개 주 — 실제 인구(2020, 백만)·도시화·소득 지수·주력 산업 ──
+// 지역 수가 50일 때 미국 프리셋이 이 값으로 국토를 채운다.
+// 지형(다각형)은 생성된 것이라 모양은 실제와 다르지만, 인구 비중·성향 분포는 실제에 가깝다.
+const USA50 = [
+  ['캘리포니아',39.5,.95,1.20,'tech'],['텍사스',29.1,.85,.96,'mine'],['플로리다',21.5,.91,.87,'port'],['뉴욕',20.2,.88,1.07,'gov'],
+  ['펜실베이니아',13.0,.79,.98,'tech'],['일리노이',12.8,.89,1.02,'port'],['오하이오',11.8,.78,.87,'tech'],['조지아',10.7,.75,.91,'port'],
+  ['노스캐롤라이나',10.4,.66,.85,'tech'],['미시간',10.1,.75,.88,'tech'],['뉴저지',9.3,.94,1.28,'port'],['버지니아',8.6,.76,1.16,'gov'],
+  ['워싱턴',7.7,.84,1.17,'tech'],['애리조나',7.2,.90,.92,'mine'],['매사추세츠',7.0,.92,1.28,'tech'],['테네시',6.9,.66,.82,'tech'],
+  ['인디애나',6.8,.72,.88,'tech'],['메릴랜드',6.2,.87,1.30,'gov'],['미주리',6.2,.70,.85,'farm'],['위스콘신',5.9,.70,.95,'farm'],
+  ['콜로라도',5.8,.86,1.14,'tech'],['미네소타',5.7,.73,1.10,'farm'],['사우스캐롤라이나',5.1,.66,.83,'port'],['앨라배마',5.0,.59,.78,'tech'],
+  ['루이지애나',4.7,.73,.77,'mine'],['켄터키',4.5,.59,.78,'mine'],['오리건',4.2,.81,1.00,'tech'],['오클라호마',4.0,.66,.81,'mine'],
+  ['코네티컷',3.6,.88,1.19,'gov'],['유타',3.3,.91,1.12,'tech'],['아이오와',3.2,.64,.92,'farm'],['네바다',3.1,.94,.93,'mine'],
+  ['아칸소',3.0,.56,.74,'farm'],['미시시피',3.0,.49,.69,'farm'],['캔자스',2.9,.74,.92,'farm'],['뉴멕시코',2.1,.77,.76,'mine'],
+  ['네브래스카',2.0,.73,.95,'farm'],['아이다호',1.8,.70,.90,'farm'],['웨스트버지니아',1.8,.49,.70,'mine'],['하와이',1.5,.92,1.23,'port'],
+  ['뉴햄프셔',1.4,.60,1.21,'tech'],['메인',1.4,.39,.89,'port'],['로드아일랜드',1.1,.91,1.04,'port'],['몬태나',1.1,.56,.85,'mine'],
+  ['델라웨어',0.99,.83,1.03,'gov'],['사우스다코타',0.89,.57,.88,'farm'],['노스다코타',0.78,.60,.98,'mine'],['알래스카',0.73,.66,1.16,'mine'],
+  ['버몬트',0.64,.35,.94,'farm'],['와이오밍',0.58,.65,.96,'mine'],
+];
+const REAL_REGION_DATA = { usa: USA50 };
+// 이름만이 아니라 인구 비중·도시화·소득·산업까지 덮어쓴다. 시민을 만들기 전에 불러야 한다.
+function applyRealRegionData(key){
+  const D=REAL_REGION_DATA[key]; if(!D || D.length!==NREG) return false;
+  const avg=D.reduce((a,x)=>a+x[1],0)/D.length;
+  for(let i=0;i<NREG;i++){
+    const [nm,pop,urb,wl,ind]=D[i];
+    REGION_NAMES[i]=nm;
+    const t=REGION_TRAITS[i]||(REGION_TRAITS[i]={});
+    t.popW=pop/avg; t.urban=urb; t.wealth=wl; t.ind=ind;
+  }
+  return true;
+}
 function applyRealRegionNames(key){
+  const D=REAL_REGION_DATA[key];
+  if(D && D.length===NREG){ for(let i=0;i<NREG;i++) REGION_NAMES[i]=D[i][0]; return true; }
   const arr=REAL_REGION_NAMES[key]; if(!arr) return false;
   for(let i=0;i<NREG;i++) REGION_NAMES[i]=arr[i]||REGION_NAMES[i];
   return true;
@@ -3139,6 +3172,8 @@ class Sim {
 
   // ── 메인 틱 ──
   step(){
+    // 정당 나이 — 후보 등록 마감(창당 6개월 전) 판정에 쓴다
+    for(const p of this.parties) if(p.bornTick==null) p.bornTick = (this.tick<=(this._bornGrace??1))? -999 : this.tick;
     this.tick++;
     this.stepSociety();
     this.stepCitizens();
@@ -3220,7 +3255,7 @@ class Sim {
     // 대통령 독립 선거: 임기가 하원과 다르거나 임기 시작이 어긋나 있으면 따로 실시
     if((this.govForm==='PRES'||this.govForm==='SEMI') && this.regime!=='MIL'
        && this.parties.some(p=>p.support>0.04)
-       && (this.presInterval!==this.elecInterval || (this.con.presOffset||0)>0)){
+       && (this.presInterval % this.elecInterval!==0 || (this.con.presOffset||0)>0)){   // 배수면 총선 때 같이 치른다
       if(this.lastPresElection===undefined || this.lastPresElection<-900){
         // 최초 기준점: 어긋내기(개월)만큼 뒤로 밀어 첫 대선 시점을 옮긴다
         this.lastPresElection = this.tick - this.presInterval + Math.round((this.con.presOffset||0)*12);
@@ -3229,7 +3264,8 @@ class Sim {
       }
     }
     // 상원 독립 선거 (임기가 하원과 다를 때만 따로 실시)
-    if(this.con.senate!=='NONE' && this.con.senTerm!==this.con.term
+    // 주기가 하원과 같으면 총선 때 함께 치른다 — 여기서 또 돌리면 한 조가 두 번 개선된다
+    if(this.con.senate!=='NONE' && this.senInterval!==this.elecInterval
        && this.regime!=='MIL' && this.parties.some(p=>p.support>0.04)){
       if(this.lastSenate<-900 || this.tick-this.lastSenate>=this.senInterval){
         this.lastSenate=this.tick; this.senateElection();
@@ -3885,7 +3921,7 @@ class Sim {
         this.chron(`합당: ${small.name} → ${big.name}`);
         // 흡수한 쪽은 id가 유지되므로 기록은 그대로다. 흡수 사실만 남긴다.
         if(!big.absorbed) big.absorbed=[];
-        big.absorbed.push({name:small.name, y:this.year(), seats:small.seats||0, founded:small.founded});
+        big.absorbed.push({id:small.id, name:small.name, y:this.year(), seats:small.seats||0, founded:small.founded});
         if(this.markSeatChange && (small.seats||0)>0){
           this.markSeatChange(small.id, -(small.seats||0), '흡수 합당', big.name);
           this.markSeatChange(big.id, (small.seats||0), '흡수', small.name);
@@ -4185,6 +4221,7 @@ class Sim {
       founded: big.founded ?? this.year(),
       mergedFrom: ms.map(q=>({id:q.id, name:q.name, seats:q.seats||0, founded:q.founded})),
       heir: big.id,
+      bornTick: big.bornTick ?? -999,
       lowStreak:0, home:big.home, factions:null, leader:a.leader||big.leader||null };
     // 조직력·계보도 승계한다
     if(big.org!=null) np.org=big.org*0.9;
@@ -11017,9 +11054,12 @@ class Sim {
         u.push(st.unemp??0); w.push(st.wealth??st.gdp??1);
       }
       if(u.length>1){
-        const uGap=(Math.max(...u)-Math.min(...u))/12;             // 실업 격차
+        // 최대−최소로 재면 지역 수가 늘수록 극단값이 커져 지역주의가 괜히 오른다(50주).
+        // 표준편차 × 3.3 — 12지역에서 범위와 비슷한 크기, 지역 수에 둔감
+        const sd=a=>{ const m=a.reduce((x,y)=>x+y,0)/a.length; return Math.sqrt(a.reduce((x,y)=>x+(y-m)**2,0)/a.length); };
+        const uGap=sd(u)*3.3/12;                                        // 실업 격차
         const wm=w.reduce((a,b)=>a+b,0)/w.length || 1;
-        const wGap=(Math.max(...w)-Math.min(...w))/Math.max(wm,0.01)/3;  // 부 격차
+        const wGap=sd(w)*3.3/Math.max(wm,0.01)/3;                       // 부 격차
         gap = clamp(uGap*0.55 + wGap*0.45, 0, 1) * 0.38;
       }
     }
@@ -12342,7 +12382,7 @@ class Sim {
     if(lg) lg.died=this.year();
     if(heir){
       if(!heir.absorbed) heir.absorbed=[];
-      heir.absorbed.push({name:p.name, y:this.year(), seats:p.seats||0, founded:p.founded});
+      heir.absorbed.push({id:p.id, name:p.name, y:this.year(), seats:p.seats||0, founded:p.founded});
     }
     // 흡수한 당이 있으면 의원도 따라간다, 없으면 무소속
     if(this._vacateSeats) this._vacateSeats(p, (typeof heir!=='undefined'? heir : null), '흡수 소멸');
@@ -12851,7 +12891,7 @@ class Sim {
     if(lg) lg.died=this.year();
     if(heir){
       if(!heir.absorbed) heir.absorbed=[];
-      heir.absorbed.push({name:p.name, y:this.year(), seats:p.seats||0, founded:p.founded});
+      heir.absorbed.push({id:p.id, name:p.name, y:this.year(), seats:p.seats||0, founded:p.founded});
     }
     // 흡수한 당이 있으면 의원도 따라간다, 없으면 무소속
     if(this._vacateSeats) this._vacateSeats(p, (typeof heir!=='undefined'? heir : null), '흡수 소멸');
@@ -12906,15 +12946,9 @@ class Sim {
     const ec=new Map();          // 정당 → 선거인 수
     const states=[];
     for(let r=0;r<NREG;r++){
-      const c=new Map(); let n=0;
-      for(let i=0;i<N;i++){
-        if(this.region[i]!==r || this.party[i]<0) continue;
-        // 투표 여부
-        const t=clamp(0.42+this.polInterest[i]*0.42+this.education[i]*0.15+(this.age[i]>40?0.10:0), 0.30, 1);
-        if(rnd()>t*(this.compulsoryBoost||1)) continue;
-        c.set(this.party[i],(c.get(this.party[i])||0)+1); n++;
-      }
+      const SS=this.stateShares(r), n=SS.n;
       if(!n) continue;
+      const c=new Map(); SS.shares.forEach((v,id)=>c.set(id, v*n));
       const arr=[...c.entries()].sort((a,b)=>b[1]-a[1]);
       const winId=arr[0][0], margin=(arr[0][1]-(arr[1]?arr[1][1]:0))/n*100;
       let award;
@@ -12963,6 +12997,7 @@ class Sim {
     votes.forEach((v,id)=>{ if(v>pvTop){pvTop=v; pv=id;} });
     const inversion = pv!=null && winner!=null && pv!==winner;
 
+    this.commitStateLean();
     // ── 과반 미달 → 하원 결선 (미 수정헌법 12조) ──
     // 상위 3명 중에서 하원이 뽑되, 의원 수와 무관하게 주마다 1표다.
     // 인구 적은 주가 큰 주와 같은 힘을 가지고, 득표 1위가 협상에서 질 수 있다(1824년).
@@ -13005,11 +13040,8 @@ class Sim {
     // 주별 대표단 구성 — 그 주 유권자의 정당 지지에 비례
     const comp=[];
     for(let r=0;r<NREG;r++){
-      const c=new Map();
-      for(let i=0;i<N;i+=2){
-        if(this.region[i]!==r || this.party[i]<0 || this.age[i]<18) continue;
-        c.set(this.party[i],(c.get(this.party[i])||0)+1);
-      }
+      const c=new Map(); const SS=this.stateShares(r);
+      SS.shares.forEach((v,id)=>c.set(id, v*SS.n));
       const ids=[...c.keys()];
       const al=ids.length? this.apportion(ids.map(k=>c.get(k)), deleg[r]||0) : [];
       comp.push(ids.map((id,k)=>[id, al[k]||0]).filter(x=>x[1]>0));
@@ -13146,6 +13178,43 @@ class Sim {
     for(let i=0;i<N;i+=6){
       if(this.polInterest[i]<0.3) this.polInterest[i]=clamp(this.polInterest[i]+0.004);
     }
+  }
+
+  // ── 주별 정당 지지 ──
+  // 시민 3,000명을 50개 주로 나누면 작은 주는 유권자가 10명 남짓이다.
+  // 난수 투표율로 세면 몇 표 차이로 선거인단·상원이 뒤집힌다.
+  // ① 전수 집계 + 투표 확률 기대값 가중 (난수 없음)
+  // ② 당파 성향 기억 — 표본이 작을수록 이전 선거 결과에 기댄다 (주의 정치 색은 쉽게 안 바뀐다)
+  stateShares(r){
+    if(!this._ssCache || this._ssCache.tick!==this.tick || this._ssCache.n!==NREG)
+      this._ssCache={tick:this.tick, n:NREG, m:new Array(NREG)};
+    if(this._ssCache.m[r]) return this._ssCache.m[r];
+    const va=this.con.voteAge||18, cb=this.compulsoryBoost||1;
+    const c=new Map(); let n=0;
+    for(let i=0;i<N;i++){
+      if(this.region[i]!==r || this.age[i]<va || this.party[i]<0) continue;
+      const t=clamp((0.42+this.polInterest[i]*0.42+this.education[i]*0.15+(this.age[i]>40?0.10:0))*cb, 0.30, 1);
+      c.set(this.party[i],(c.get(this.party[i])||0)+t); n+=t;
+    }
+    if(!this._stateLean || this._stateLean.length!==NREG) this._stateLean=new Array(NREG).fill(null);
+    const prev=this._stateLean[r];
+    const alpha = n/(n+25);                 // 유권자 25명 수준이면 절반은 과거 성향
+    const out=new Map();
+    const ids=new Set([...c.keys(), ...(prev? prev.keys() : [])]);
+    for(const id of ids){
+      if(!this.parties.some(p=>p.id===id)) continue;
+      const cur=n? (c.get(id)||0)/n : 0;
+      const old=prev && prev.has(id)? prev.get(id) : cur;
+      const v=alpha*cur + (1-alpha)*old;
+      if(v>0.002) out.set(id,v);
+    }
+    let t=0; out.forEach(v=>t+=v); out.forEach((v,k)=>out.set(k, v/(t||1)));
+    return (this._ssCache.m[r]={shares:out, n});
+  }
+  commitStateLean(){
+    if(!this._ssCache) return;
+    if(!this._stateLean || this._stateLean.length!==NREG) this._stateLean=new Array(NREG).fill(null);
+    for(let r=0;r<NREG;r++){ const e=this._ssCache.m[r]; if(e) this._stateLean[r]=new Map(e.shares); }
   }
   // ════════ 블록 단위 정부 구성 ════════
   // 지금까지 정부는 '제1당'에서 시작해 이웃을 포섭하는 방식이었다.
@@ -13351,6 +13420,21 @@ class Sim {
     const dTally= nd? Array.from({length:nd},()=>new Map()) : null;
     let cast=0;
     const viable=new Set(this.parties.filter(p=>p.support>=0.10).map(p=>p.id));
+    // 후보 등록 마감 — 선거 직전에 창당·분당한 당은 후보를 못 낸다.
+    // 예전엔 선거하는 달에 생긴 당이 바로 의석을 가져가 "뿅" 튀어나왔다.
+    // 합당은 기존 정당의 연속으로 보아 예외다.
+    const DL=this.ballotDeadline??6;
+    const elig=new Set(this.parties.filter(p=>p.id<0 || p.mergedFrom || (this.tick-(p.bornTick??this.tick))>=DL).map(p=>p.id));
+    const redirect=new Map();
+    for(const p of this.parties){
+      if(elig.has(p.id)) continue;
+      let best=null, bd=1e9;
+      for(const q of this.parties){ if(q.id<0 || !elig.has(q.id)) continue;
+        const d=this.partyDist(p.cent,q); if(d<bd){ bd=d; best=q.id; } }
+      redirect.set(p.id, best);
+      if(!p._dlNoted && (p.support||0)>0.02){ p._dlNoted=true;   // 군소 신당까지 알리면 뉴스가 넘친다
+        this.pushNews(2,'norm',`<b>${p.name}</b> — 등록 마감 뒤 창당해 이번 선거엔 후보를 내지 못했다. 지지자 일부는 가까운 당을 찍는다`); }
+    }
     for(let i=0;i<N;i++){
       if(this.age[i]<C.voteAge) continue;
       if(this.estateOn && !this.canVote(i)) continue;     // 신분제: 참정권 제한
@@ -13359,6 +13443,7 @@ class Sim {
         if(!this.independents || this.polInterest[i]<0.42 || rnd()>0.55) continue;
         pid=-2;  // 무소속
       }
+      if(!elig.has(pid)){ const alt=redirect.get(pid); if(alt==null || rnd()>0.65) continue; pid=alt; }
       // 정치관심 포화를 고친 뒤 관심 평균이 0.47로 내려갔으므로 기본 참여를 올린다
       // 하한을 둔다. 실측에서 최저 13%가 나왔는데 현실에는 그런 총선이 없다
       // (최저가 스위스 45% 수준). 무관심층이 많아도 기본 참여는 존재한다.
@@ -14037,14 +14122,14 @@ class Sim {
     const top=[...this.senate].sort((a,b)=>b.seats-a.seats)[0];
     const tp=top&&this.parties.find(p=>p.id===top.id);
     this.pushNews(2, govSen<=senT*C.majority?'sev2':'norm',
-      `<b>${this.year()}년 상원 선거</b> (${C.senRenew?'절반 개선':'전면 개선'}) — ${tp?tp.name:'?'} 제1당`
+      `<b>${this.year()}년 상원 선거</b> (${this.senClasses===3?'3분의 1 개선':this.senClasses===2?'절반 개선':'전면 개선'}) — ${tp?tp.name:'?'} 제1당`
       +(govSen<=senT*C.majority?' · <b>여소야대 상원</b>':''));
     this.chron(`상원 선거: ${tp?tp.name:'?'} 제1당`);
     // 상세 페이지용 기록
     const sorted=[...this.senate].map(x=>{const p=this.parties.find(q=>q.id===x.id);
       return {id:x.id, seats:x.seats, name:p?p.name:'무소속', color:p?p.color:'#9aa6bd',
         votes:(votes.get(x.id)||0)/Math.max(cast,1)*100};}).sort((a,b)=>this.lr((this.parties.find(p=>p.id===a.id)||{cent:[0,0,0,0,0,0]}).cent)-this.lr((this.parties.find(p=>p.id===b.id)||{cent:[0,0,0,0,0,0]}).cent));
-    this.senatePageRec={ y:this.year(), senName:SENNAME[C.senate], renew:C.senRenew, senPower:C.senPower,
+    this.senatePageRec={ y:this.year(), senName:SENNAME[C.senate], renew:C.senRenew, classes:this.senClasses, classUp:this.senateClassUp, senPower:C.senPower,
       majority:C.majority, senT, govSen, turnout:(cast/Math.max(1,this._adults()||N*0.7)*100),
       rows:sorted, gov:this.govCoalition.slice() };
   }
@@ -14090,7 +14175,31 @@ class Sim {
         for(let r=0;r<NREG;r++){ stateSeats[r]=per+(rem>0?1:0); if(rem>0)rem--; }
       }
       const reg=Array.from({length:NREG},()=>new Map());
-      for(let i=0;i<N;i++){ if(this.age[i]<C.voteAge||this.party[i]<0)continue; const r=this.region[i]; reg[r].set(this.party[i],(reg[r].get(this.party[i])||0)+1); }
+      // 주별 지지 — 작은 주의 표본 잡음을 줄인 값 (선거인단과 같은 기준)
+      for(let r=0;r<NREG;r++){ const SS=this.stateShares? this.stateShares(r) : null;
+        if(SS) SS.shares.forEach((v,id)=>reg[r].set(id, v*SS.n));
+        else for(let i=0;i<N;i++){ if(this.region[i]!==r||this.age[i]<C.voteAge||this.party[i]<0)continue; reg[r].set(this.party[i],(reg[r].get(this.party[i])||0)+1); } }
+      if(this.commitStateLean) this.commitStateLean();
+      // 주 r에서 n석을 뽑아 target에 더한다
+      const allocState=(r, n, target)=>{ const per=n; if(per<=0)return;
+        const arr=[...reg[r].entries()].sort((a,b)=>b[1]-a[1]); if(!arr.length)return;
+        if(mode==='winner'){ target.set(arr[0][0],(target.get(arr[0][0])||0)+per); }
+        else if(per===1){ target.set(arr[0][0],(target.get(arr[0][0])||0)+1); }
+        else {
+          const tv=arr.reduce((a,x)=>a+x[1],0)||1; let u=0; const rm=[];
+          for(const [id,v] of arr){ const q=v/tv*per, fl=Math.floor(q); target.set(id,(target.get(id)||0)+fl); u+=fl; rm.push([id,q-fl]); }
+          rm.sort((a,b)=>b[1]-a[1]); for(let k=0;u<per&&rm.length;k=(k+1)%rm.length){target.set(rm[k][0],(target.get(rm[k][0])||0)+1);u++;}
+        }
+      };
+      // 조별 개선: 주 r의 j번째 의석은 (r+j) mod K 조에 속한다.
+      // 미국처럼 주마다 2석이고 3조면, 한 주는 3번 중 2번만 선거를 치르고 한 번은 쉰다.
+      const K=this.senClasses, kUp=this.senateClass % K;
+      this._senFedUp = K>1? new Map() : null;
+      if(K>1) for(let r=0;r<NREG;r++){
+        let up=0; for(let j=0;j<stateSeats[r];j++) if((r+j)%K===kUp) up++;
+        allocState(r, up, this._senFedUp);
+      }
+      this._senStateSeats=stateSeats;
       for(let r=0;r<NREG;r++){ const per=stateSeats[r]; if(per<=0)continue;
         const arr=[...reg[r].entries()].sort((a,b)=>b[1]-a[1]); if(!arr.length)continue;
         if(mode==='winner'){ alloc.set(arr[0][0],(alloc.get(arr[0][0])||0)+per); }
@@ -14102,11 +14211,37 @@ class Sim {
         }
       }
     }
-    // 부분교체: 기존 의석과 절반 평균
-    let next=this.parties.map(p=>({id:p.id, seats:alloc.get(p.id)||0}));
-    if(C.senRenew && this.senate.length){
-      const prev=new Map(this.senate.map(s=>[s.id,s.seats]));
-      next=next.map(s=>({id:s.id, seats:Math.round((s.seats+(prev.get(s.id)||0))/2)}));
+    // ── 조별 개선 ──
+    // 예전에는 새 결과와 기존 의석을 평균 냈다(근사). 이제 조마다 의석을 따로 들고,
+    // 이번 조만 새로 뽑고 나머지 조는 임기가 남아 그대로 앉아 있다.
+    const K=this.senClasses;
+    const sizes=Array.from({length:K},(_,k)=>Math.floor(T/K)+(k<T%K?1:0));
+    const kUp=this.senateClass % K;
+    const fresh=k=>{
+      // FEDERAL은 주별로 이미 이번 조 의석을 뽑아뒀다
+      if(C.senate==='FEDERAL' && this._senFedUp && K>1) return new Map(this._senFedUp);
+      const ids=[...alloc.keys()].filter(id=>(alloc.get(id)||0)>0);
+      const al=this.apportion(ids.map(id=>alloc.get(id)), sizes[k]);
+      const m=new Map(); ids.forEach((id,i)=>{ if(al[i]) m.set(id, al[i]); }); return m;
+    };
+    const valid = K>1 && Array.isArray(this.senClassSeats) && this.senClassSeats.length===K;
+    if(K===1) this.senClassSeats=[new Map(alloc)];
+    else if(!valid){
+      // 처음이거나 조 수가 바뀌었다 — 전 조를 한 번에 채운다(첫 상원은 전면 선거)
+      this.senClassSeats=Array.from({length:K},(_,k)=>fresh(k));
+    } else {
+      this.senClassSeats[kUp]=fresh(kUp);
+      // 사라진 정당의 의석은 무소속으로 (조 안에서 증발하지 않게)
+      for(const cm of this.senClassSeats) for(const [id,n] of [...cm.entries()])
+        if(id!==-2 && !this.parties.some(p=>p.id===id)){ cm.delete(id); cm.set(-2,(cm.get(-2)||0)+n); }
+    }
+    this.senateClassUp = K>1? kUp : null;
+    this.senateClass++;
+    const sum=new Map();
+    for(const cm of this.senClassSeats) cm.forEach((n,id)=>sum.set(id,(sum.get(id)||0)+n));
+    let next=[...sum.entries()].map(([id,seats])=>({id, seats}));
+    if(sum.has(-2) && !this.parties.some(p=>p.id===-2)){
+      this.parties.push({id:-2,name:'무소속',color:'#9aa8c4',cent:new Float64Array(6),rad:0.2,support:0,seats:0,founded:this.year(),lowStreak:0,home:-1,factions:null,leader:null});
     }
     // 총합을 senSeats에 정확히 맞춤
     let stot=next.reduce((a,x)=>a+x.seats,0);
@@ -14340,7 +14475,7 @@ class Sim {
       this.presPageRec = {
         y:this.year(), rec:this._presRec, winner:win.name, color:win.color,
         leader: win.leader? win.leader.name : '',
-        turnover: !sameParty, prevParty: prevP? prevP.name : null,
+        turnover: prev!=null && !sameParty, first: prev==null, prevParty: prevP? prevP.name : null,
         terms: this.president.terms,
       };
     }
@@ -14376,7 +14511,10 @@ class Sim {
     if(F==='SEMI') this.cohabitation=divided;
     if(divided) this.gridlock=true;
   }
-  get senInterval(){ return Math.max(12, Math.round(this.con.senTerm*12)); }
+  // 상원 조(class) 수 — 1: 전면 개선, 2: 절반, 3: 3분의 1(미국)
+  get senClasses(){ const k=this.con.senClasses; return k? Math.max(1,Math.min(3,k|0)) : (this.con.senRenew? 2 : 1); }
+  // 조를 나누면 임기 ÷ 조 수마다 한 조씩 뽑는다 (미국: 6년 임기, 2년마다)
+  get senInterval(){ return Math.max(12, Math.round(this.con.senTerm*12/this.senClasses)); }
   // ── 듀베르제 심리적 효과: 死票가 된 정당 지지자가 큰 정당으로 이탈 ──
   _applyDuverger(votes, cast, T, gallagher){
     const C=this.con;
@@ -14455,7 +14593,7 @@ class Sim {
     this._judgeDissolve();
     const T=C.lowerSeats;
     // 상원 임기가 하원과 같으면 동시선거(같은 표로 즉시 갱신)
-    if(C.senate!=='NONE' && this.con.senTerm===this.con.term){ this._runSenate(votes, cast); this.lastSenate=this.tick;
+    if(C.senate!=='NONE' && this.senInterval===this.elecInterval){ this._runSenate(votes, cast); this.lastSenate=this.tick;
       this.pushNews(1,'norm',`상원 동시 개선 — ${SENNAME[C.senate]}`); }
     if(this.electionFair<1) this.pushNews(3,'sev3','국제 감시단 "선거 공정성에 중대한 결함" 보고');
     // 통계
@@ -14479,7 +14617,12 @@ class Sim {
       const F=this.govForm;
       // 대통령 선출: 임기가 하원과 같고 어긋내기가 없을 때만 동시선거로 처리한다.
       // (분리된 경우는 presidentialElection()이 자체 주기로 실행한다)
-      if((F==='PRES' || F==='SEMI') && this.presInterval===this.elecInterval && !(C.presOffset>0)){
+      // 미국처럼 대선 4년·하원 2년이면 두 번에 한 번은 같은 날이다. 예전엔 임기가 똑같을 때만
+      // 동시로 봐서, 겹치는 해에도 대선이 따로 돌고 첫 총선엔 대통령이 없어 내각제식 협상으로 빠졌다.
+      const aligned = !(C.presOffset>0) && this.presInterval % this.elecInterval===0;
+      const presDue = this.lastPresElection===undefined || this.lastPresElection<-900
+        || this.tick-this.lastPresElection >= this.presInterval-1;
+      if((F==='PRES' || F==='SEMI') && aligned && presDue){
         this.presidentialElection(votes, cast, true);
       }
       // 행정부 구성
@@ -14677,10 +14820,23 @@ class Sim {
         dTotal:this.parties.reduce((a,p)=>a+p.dSeats,0), pTotal:this.parties.reduce((a,p)=>a+p.pSeats,0),
         total:T, pres:this._presRec||null, multiNom:this._mnStats||null, slates:(this._lastSlate||[]).slice(0,6),
         poll:this.lastPoll? this.lastPoll.vals.map(v=>({id:v.id,v:v.v})):null,
-        results: this.parties.filter(p=>p.seats>0 || (votes.get(p.id)||0)/Math.max(cast,1)>=0.01)
+        results: (()=>{
+          // 증감은 '직전 총선' 기준이어야 한다. 예전엔 선거 직전 의석(prevSeats)을 써서
+          // 임기 중 분당·합당·이적이 섞여 들어갔다(55회 중 266건 불일치).
+          const lastE=this.elections[this.elections.length-1];
+          const lastM=new Map(lastE? lastE.results.map(r=>[r.id,r.seats]) : []);
+          const lastY=lastE? lastE.y : -1e9;
+          return this.parties.filter(p=>p.seats>0 || (votes.get(p.id)||0)/Math.max(cast,1)>=0.01)
           .sort((a,b)=>this.lr(a.cent)-this.lr(b.cent))
-          .map(p=>({id:p.id,name:p.name,color:p.color,seats:p.seats,dSeats:p.dSeats,pSeats:p.pSeats,
-                    prev:p.prevSeats, votes:(votes.get(p.id)||0)/Math.max(cast,1)*100, lr:this.lr(p.cent)})),
+          .map(p=>{
+            let prev=lastM.get(p.id), kind='cont';
+            if(prev==null && p.mergedFrom){ prev=p.mergedFrom.reduce((a,x)=>a+(lastM.get(x.id)||0),0); kind='merge'; }
+            else if(prev==null){ prev=0; kind= lastE? 'new' : 'first'; }
+            // 임기 중 흡수한 당의 직전 총선 의석도 더해야 증감이 맞는다
+            if(p.absorbed) for(const a of p.absorbed) if(a.y>=lastY && a.id!=null) prev+=lastM.get(a.id)||0;
+            return {id:p.id,name:p.name,color:p.color,seats:p.seats,dSeats:p.dSeats,pSeats:p.pSeats,
+                    prev, pre:p.prevSeats||0, kind, votes:(votes.get(p.id)||0)/Math.max(cast,1)*100, lr:this.lr(p.cent)}; });
+        })(),
         senate: C.senate!=='NONE'? this.senate.map(s=>{const p=this.parties.find(q=>q.id===s.id);
           return {id:s.id, seats:s.seats, name:p?p.name:'?', color:p?p.color:'#888'};}).sort((a,b)=>b.seats-a.seats):null,
         senName: SENNAME[C.senate], divided, senPower:C.senPower, majority:C.majority,
@@ -16079,7 +16235,7 @@ class Sim {
                     {name:'일본공산당',   share:0.07, color:'#db0000', cent:[ 0.25,-0.05, 0.20,-0.30, 0.80,-0.15], rad:0.40, org:0.92, disc:0.96, faction:0.1},
                     {name:'사회민주당',   share:0.05, color:'#e60012', cent:[ 0.30,-0.10,-0.05,-0.10, 0.60,-0.05], rad:0.34}],
               regionalismSeed:0.25},
-    usa:     {resource:0.14, label:'🇺🇸 미국형', form:'PRES',     regions:14, con:{presTerm:4,presLimit:2,presOffset:0,method:'FPTP',lowerSeats:435,term:2,renewHalf:false,senate:'FEDERAL',senSeats:100,senTerm:6,senRenew:true,senPower:1.0,majority:0.5,presRunoff:false},
+    usa:     {resource:0.14, label:'🇺🇸 미국형', form:'PRES',     regions:50, con:{presTerm:4,presLimit:2,presOffset:0,method:'FPTP',lowerSeats:435,term:2,renewHalf:false,senate:'FEDERAL',senSeats:100,senTerm:6,senRenew:true,senClasses:3,senPower:1.0,majority:0.5,presRunoff:false,ecOn:true,ecMode:'wta',ecSize:538,ecMin:3,senFedMode:'equal'},
               desc:'대통령제 · 소선거구 · 연방 상원(주별 2석, 1/3씩 개선, 대칭형)',
               seed:[ // 강한 양당제, 이념거리 큼
                 {name:'공화당',     share:0.47, color:'#d02020', cent:[-0.45, 0.15, 0.40,  0.20, -0.10, -0.05], rad:0.20},
@@ -16209,9 +16365,12 @@ class Sim {
               ], activistPullSeed:0.25},
   }; }
   applyPresetNation(key, seedParties){
+    this._bornGrace=this.tick+2;   // 프리셋이 만든 정당은 처음부터 있던 것으로 본다
     const P=Sim.PRESETS[key]; if(!P)return;
     this.govForm=P.form; this.president=null; this.monarch=null; this.king=null; this.gridlock=false; this.cohabitation=false;
     Object.assign(this.con, {method:'PR',lowerSeats:300,districtRatio:0.67,threshold:5,sntvMag:4,term:4,voteAge:18,majority:0.5,nomination:'top',prMethod:'hare',renewHalf:false,senate:'NONE',senSeats:100,senTerm:6,senRenew:false,senPower:0.5,presTerm:0,presLimit:0,presOffset:0}, P.con);
+    // 선거인단은 Sim 플래그라 con에 넣는 것만으로는 켜지지 않는다 — 프리셋에 없으면 끈다
+    this.ecOn = !!(P.con && P.con.ecOn);
     this.ensureKing();
     // 프리셋에 담긴 제도적 특성 적용 (건설적 불신임·방어적 민주주의 등)
     if(P.constructiveNC!==undefined) this.constructiveNC=P.constructiveNC;
@@ -17411,6 +17570,7 @@ class Sim {
       indep:this.independents, allies:this.alliances.map(a=>Object.assign({},a,{leader:undefined,leaderLid:a.leader?a.leader.lid:null})), nextAllyId:this.nextAllyId, autoAlly:this.autoAlliance, facOn:this.factionsOn, facTen:this.factionTension, blocsOn:this.blocsOn, blocs:this.blocs, B:this.B, preset:this.preset||'balanced',
       regio:this.regionalism, archiveOn:this.archiveOn, docs:this.docs, moments:this.moments,
       presLog:this.presLog, primaries:this.primaries, scandals:this.scandals, pollRun:this._pollRun,
+      senClassSeats:this.senClassSeats? this.senClassSeats.map(m=>[...m.entries()]) : null,
       mediaOutlets:this.mediaOutlets, judges:this.judges, courtCapture:this.courtCapture, courtPacked:this.courtPacked,
       ecOn:this.ecOn, regC:this.regCount, con:this.con, senate:this.senate, senClass:this.senateClass,
       country:this.country, partyLog:this.partyLog, lastFound:this.lastFound,
@@ -17539,6 +17699,8 @@ class Sim {
     for(const k of ['presLog','primaries','scandals','mediaOutlets','judges','courtCapture','courtPacked','ecOn'])
       if(d[k]!==undefined) s[k]=d[k];
     if(d.pollRun) s._pollRun=d.pollRun;
+    for(const p of s.parties) if(p.bornTick==null) p.bornTick=-999;   // 예전 저장본
+    if(d.senClassSeats) s.senClassSeats=d.senClassSeats.map(a=>new Map(a));
     if(d.con)Object.assign(s.con,d.con); s.senate=d.senate||[]; s.senateClass=d.senClass||0;
     s.partyLog=d.partyLog||[]; s.lastFound=d.lastFound??-999;
     s.politicians=d.politicians||[]; s._nextLid=d.nextLid||0;
@@ -18079,9 +18241,12 @@ const UI={
         const PK=this._draftPresetKey;
         const PN=Sim.PRESETS[PK];
         // 지역 수까지 반영: 지형을 새로 만들고 시뮬을 재시작한다
-        if(this._seedRegionOnPreset && PN && PN.regions && PN.regions!==NREG){
+        // 실제 주 데이터가 있는 프리셋은 지역 수가 같아도 인구를 다시 채운다
+        if(this._seedRegionOnPreset && PN && PN.regions && (PN.regions!==NREG || (typeof REAL_REGION_DATA!=='undefined' && REAL_REGION_DATA[PK]))){
           const seed=(Math.random()*1e9)|0;
           applyGeneratedWorld(PN.regions, seed, 0.60);
+          // 실제 주 인구·특성이 있으면 시민을 만들기 전에 덮어쓴다 (미국 50개 주)
+          if(typeof applyRealRegionData==='function') applyRealRegionData(PK);
           const sd=(Math.random()*1e9)|0;
           if(window.POLIS_setSeed) window.POLIS_setSeed(sd);
           this.sim=new Sim();
@@ -21895,7 +22060,10 @@ Object.assign(UI, {
     const num=n=>String(n).replace(/\B(?=(\d{3})+(?!\d))/g,',');
     const pct=v=>(v||0).toFixed(1)+'%';
     const delta=p=>{ const d=(p.seats||0)-(p.prev||0);
-      return d>0? `<span style="color:#5ae0b4">+${d}</span>` : d<0? `<span style="color:#ff6262">${d}</span>` : '<span style="color:var(--tx3)">0</span>'; };
+      if(p.kind==='new') return '<span style="color:#5ae0b4">신당</span>';
+      if(p.kind==='first') return '<span style="color:var(--tx3)">—</span>';
+      return (d>0? `<span style="color:#5ae0b4">+${d}</span>` : d<0? `<span style="color:#ff6262">${d}</span>` : '<span style="color:var(--tx3)">0</span>')
+        + (p.kind==='merge'? '<span style="color:var(--tx3);font-size:10px"> (합당)</span>':''); };
 
     // ── 정보상자 ──
     const box = `<div class="wkBox">
@@ -23334,10 +23502,14 @@ Object.assign(UI, {
     // 의석 막대 + 표
     $('#elBar').innerHTML=rec.results.filter(r=>r.seats).map(r=>
       `<div style="width:${r.seats/(rec.total||SEATS)*100}%;background:${r.color}" title="${r.name} ${r.seats}석"></div>`).join('');
+    { const lg=$('#elBarLegend'); if(lg) lg.remove(); }
     const maxSeats=Math.max(...rec.results.map(r=>r.seats));
     $('#elBody').innerHTML=rec.results.map((r,i)=>{
       const dv=r.seats-(r.prev||0);
-      const dl= dv>0?`<span class="up">▲${dv}</span>`:dv<0?`<span class="dn">▼${-dv}</span>`:'<span class="nt">—</span>';
+      const dl= r.kind==='new'? `<span class="up" title="직전 총선 이후 창당">신당</span>${r.pre? `<span class="nt" style="font-size:9px"> (선거 전 ${r.pre})</span>`:''}`
+        : r.kind==='first'? '<span class="nt">—</span>'
+        : (dv>0?`<span class="up">▲${dv}</span>`:dv<0?`<span class="dn">▼${-dv}</span>`:'<span class="nt">—</span>')
+          + (r.kind==='merge'? '<span class="nt" style="font-size:9px" title="전신 정당들의 직전 총선 의석 합과 비교"> 합당</span>':'');
       const sp=r.seats/(rec.total||SEATS)*100, gap=sp-r.votes;
       const gapTx= Math.abs(gap)<0.05? '' :
         `<span style="font-size:9.5px;color:${gap>0?'#9dff5a':'#ff5a7a'}"> ${gap>0?'+':''}${gap.toFixed(1)}</span>`;
@@ -23353,6 +23525,15 @@ Object.assign(UI, {
         <td><b>${r.seats}</b></td><td>${dl}</td></tr>`;
     }).join('');
     const govPs=rec.gov.map(id=>s.parties.find(p=>p.id===id)).filter(Boolean);
+    const presForm = s.govForm==='PRES';
+    if(presForm){
+      const PP=s.president? s.parties.find(p=>p.id===s.president.pid) : null;
+      const T=rec.total||1, ps=PP? (rec.results.find(r=>r.id===PP.id)||{}).seats||0 : 0;
+      $('#elGov').innerHTML = PP
+        ? `행정부: <b style="color:${PP.color}">${PP.name}</b> 대통령 · 소속당 ${ps}석 (${(ps/T*100).toFixed(0)}%) — `
+          + (ps>T/2? '<b style="color:#9dff5a">단점정부</b> · 의회도 여당이 장악' : '<b style="color:#e8a33d">분점정부</b> · 법안마다 야당과 협상해야 한다')
+        : '행정부 공백 — 대통령 선거를 기다린다';
+    } else
     $('#elGov').innerHTML= govPs.length
       ? `<b style="color:${govPs[0].color}">${govPs[0].name}</b> 주도 ${govPs.length>1?'연립':'단독'} 정부 — ${govPs.map(p=>p.name).join(' · ')}, 합계 <b>${rec.govSeats}석</b> (${rec.govSeats>(rec.total||SEATS)*0.5?'과반 확보':'소수 정부'})${rec.changed?' · <b style="color:var(--am)">정권 교체</b>':''}`
       : '정부 구성 협상 결렬';
@@ -23956,7 +24137,9 @@ Object.assign(UI, {
           <div class="cRow"><span>상원 의석</span><input type="range" id="cSenSeats" min="10" max="300" step="10" value="${d.senSeats}"><span class="cVal" id="cSenSeatsV"></span></div>
           <div class="cRow"><span>상원 임기</span><input type="range" id="cSenTerm" min="2" max="9" step="1" value="${d.senTerm}"><span class="cVal" id="cSenTermV"></span></div>
           <div class="cRow"><span>상원 권한</span><input type="range" id="cSenPow" min="0" max="100" step="5" value="${Math.round(d.senPower*100)}"><span class="cVal" id="cSenPowV"></span></div>
-          <label class="cChk"><input type="checkbox" id="cSenRenew" ${d.senRenew?'checked':''}>상원 절반만 교체 (미국식)</label>
+          <div class="cRow"><span title="임기가 겹치게 조를 나눠, 선거 때마다 일부만 새로 뽑는다">개선 방식</span><div class="cOpts" id="cSenCls">${
+            [[1,'전면'],[2,'절반 (일본·프랑스)'],[3,'3분의 1 (미국)']].map(([k,l])=>`<button class="cOpt${(d.senClasses||(d.senRenew?2:1))===k?' active':''}" data-senc="${k}">${l}</button>`).join('')}</div></div>
+          <div class="cHint" id="cSenClsHint" style="margin-left:0"></div>
           ${d.senate==='FEDERAL'?`<div style="margin-top:10px"><div style="font-size:10.5px;color:var(--tx3);margin-bottom:6px">연방 의석 배분 방식</div>
             <div class="cOpts" id="cFedMode">${[['equal','주별 균등'],['population','인구 비례'],['winner','주 승자독식']].map(([k,l])=>`<button class="cOpt ${(d.senFedMode||'equal')===k?'on':''}" data-fm="${k}">${l}</button>`).join('')}</div>
             <div class="cHint" style="margin-left:0;margin-top:7px">${ {equal:'주마다 같은 의석 — 소수·농촌 지역 과대대표 (미국 상원)',population:'인구 많은 주가 더 많은 의석 — 도시 우세',winner:'각 주 1위 정당이 그 주 전체 독식 — 지역 쏠림 극대화'}[d.senFedMode||'equal'] }</div></div>`:''}
@@ -24193,7 +24376,16 @@ Object.assign(UI, {
     });
     drawTimeline();
     const ck=(id,key)=>{ const el=$('#'+id); if(el)el.onchange=()=>this._draft[key]=el.checked; };
-    ck('cRenew','renewHalf'); ck('cSenRenew','senRenew'); ck('cAppar','apparentement');
+    ck('cRenew','renewHalf'); ck('cAppar','apparentement');
+    const senHint=()=>{ const h=$('#cSenClsHint'); if(!h) return;
+      const k=this._draft.senClasses||(this._draft.senRenew?2:1), t=this._draft.senTerm||6;
+      h.innerHTML = k===1? `${t}년마다 전원을 새로 뽑는다.`
+        : `임기 ${t}년, <b>${(t/k).toFixed(t%k?1:0)}년마다</b> ${k===2?'절반':'3분의 1'}씩 선거. 한 번의 선거로는 상원 다수를 뒤집기 어렵다 — 여론이 바뀌어도 상원은 천천히 따라온다.`
+          + (k===3 && (this._draft.senate||'')==='FEDERAL'? ' 주마다 의석이 조에 나뉘어, 어떤 해에는 선거가 없는 주도 있다.' : ''); };
+    if($('#cSenCls')) $('#cSenCls').onclick=e=>{ const b=e.target.closest('[data-senc]'); if(!b)return;
+      this._draft.senClasses=+b.dataset.senc; this._draft.senRenew=this._draft.senClasses>1;
+      $('#cSenCls').querySelectorAll('.cOpt').forEach(x=>x.classList.toggle('active',x===b)); senHint(); };
+    senHint();
     const ecPaintL=()=>{ if(typeof ecPaint==='function') ecPaint(); };
     { const el=$('#cEC'); if(el) el.onchange=()=>{ this._draft.ecOn=el.checked;
         const r=$('#cECRow'); if(r) r.style.display=el.checked?'':'none';
@@ -24431,7 +24623,9 @@ Object.assign(UI, {
     const presSeats = P? (P.seats||0) : 0;
     html+=`<div class="prSec">정권과 의회 · 다음 선거</div>
       <div style="font-size:11.5px;line-height:1.75;color:var(--tx2)">
-        ${pr.turnover
+        ${pr.first
+          ? `<b style="color:var(--cy)">초대 대통령</b>`
+          : pr.turnover
           ? `<b style="color:var(--am)">정권 교체</b>${pr.prevParty? ` (${pr.prevParty} → ${pr.winner})`:''}`
           : `<b style="color:#9dff5a">정권 재창출</b>${pr.terms>1?` · ${pr.terms}期`:''}`}
         · 소속당 <b>${presSeats}</b>/${T}석 (${T?(presSeats/T*100).toFixed(0):0}%)
@@ -24654,6 +24848,8 @@ Object.assign(UI, {
     $('#peditPage').classList.add('show');
   },
   buildMap(){
+    // 지역이 20개를 넘으면 라벨이 겹친다 — 인구 상위 12개만 이름을 붙인다
+    const _labSet = NREG<=20? null : new Set(REGION_TRAITS.map((t,i)=>[i,t.popW||0]).sort((a,b)=>b[1]-a[1]).slice(0,12).map(x=>x[0]));
     // 가상 국가 "아스텔" 지도 — 12개 주가 유기적으로 맞물린 단일 대륙
     const W=460,H=360;
     // 각 주: 폴리곤 좌표(시계방향). REGION_NAMES/TRAITS 순서.
@@ -24707,7 +24903,7 @@ Object.assign(UI, {
       for(let id=0;id<NREG;id++){
         const t=WORLD.traits[id]; if(!t) continue;
         const cx=t._cx*sx, cy=t._cy*sy;
-        const short=REGION_NAMES[id].replace(/\s/g,'').slice(0,4);
+        const short=(_labSet && !_labSet.has(id))? '' : REGION_NAMES[id].replace(/\s/g,'').slice(0,4);
         html+=`<text x="${cx.toFixed(0)}" y="${cy.toFixed(0)}" text-anchor="middle" fill="rgba(235,243,255,0.86)" font-size="8" font-family="var(--mono)" pointer-events="none" style="text-shadow:0 0 3px rgba(0,0,0,0.8)">${short}</text>`;
         this.mapRegions.push(id);
       }
@@ -24718,7 +24914,7 @@ Object.assign(UI, {
         const d='M'+poly.map(p=>p.join(',')).join(' L')+' Z';
         html+=`<path class="region" id="reg${id}" d="${d}"><title></title></path>`;
         const cx=poly.reduce((a,p)=>a+p[0],0)/poly.length, cy=poly.reduce((a,p)=>a+p[1],0)/poly.length;
-        const short=REGION_NAMES[id].replace(/\s/g,'').slice(0,4);
+        const short=(_labSet && !_labSet.has(id))? '' : REGION_NAMES[id].replace(/\s/g,'').slice(0,4);
         html+=`<text x="${cx.toFixed(0)}" y="${cy.toFixed(0)}" text-anchor="middle" fill="rgba(235,243,255,0.82)" font-size="8.5" font-family="var(--mono)" pointer-events="none">${short}</text>`;
         this.mapRegions.push(id);
       }
@@ -25571,6 +25767,34 @@ window.addEventListener('DOMContentLoaded',()=>{
     UI.render(true);
   };
 });
+
+// ── 긴 표 접기 ──
+// 50개 주면 주별 표가 50행이 된다. 16행이 넘는 표는 12행만 보이고 나머지는 펼치기로.
+(function(){
+  const fold=root=>{
+    if(!root || !root.querySelectorAll) return;
+    root.querySelectorAll('table.wkT').forEach(t=>{
+      if(t.dataset.folded) return;
+      const tb=t.tBodies[0]; if(!tb) return;
+      const rows=[...tb.rows]; if(rows.length<=16) return;
+      t.dataset.folded='1';
+      const hide=rows.slice(12);
+      hide.forEach(r=>r.style.display='none');
+      const tr=document.createElement('tr');
+      const td=document.createElement('td'); td.colSpan=(rows[0].cells||[]).length||1;
+      td.style.cssText='text-align:center;cursor:pointer;color:var(--cy);font-size:10.5px;padding:5px';
+      td.textContent=`▾ 나머지 ${hide.length}행 펼치기`;
+      let open=false;
+      td.onclick=()=>{ open=!open; hide.forEach(r=>r.style.display=open?'':'none');
+        td.textContent= open? '▴ 접기' : `▾ 나머지 ${hide.length}행 펼치기`; };
+      tr.appendChild(td); tb.appendChild(tr);
+    });
+  };
+  try{
+    new MutationObserver(ms=>{ for(const m of ms) for(const n of m.addedNodes) if(n.nodeType===1) fold(n.parentNode||n); })
+      .observe(document.body,{childList:true,subtree:true});
+  }catch(e){}
+})();
 </script>
 </body>
 </html>
