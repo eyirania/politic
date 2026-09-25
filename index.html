@@ -3194,16 +3194,17 @@ class Sim {
     ['crisis',   /쿠데타|혁명|내전|전쟁|비상|폭동|시위|위기|계엄|테러/],
     ['econ',     /경제|실업|물가|재정|GDP|성장|불황|호황/],
   ];
-  _newsEvent(sev,cls,html){
+  _newsEvent(sev,cls,html,kindOverride){
     const text=String(html||'').replace(/<[^>]+>/g,'');
     let kind='etc';
-    for(const [k,re] of Sim.NEWS_KINDS) if(re.test(text)){ kind=k; break; }
+    if(kindOverride) kind=kindOverride;
+    else for(const [k,re] of Sim.NEWS_KINDS) if(re.test(text)){ kind=k; break; }
     const pids=[];
     for(const p of this.parties){ if(p.name && p.name.length>=2 && text.includes(p.name) && pids.length<4) pids.push(p.id); }
     return {y:this.year(), m:this.month(), sev, cls, html, text, kind, pids};
   }
-  pushNews(sev,cls,html){
-    this.news.unshift(this._newsEvent(sev,cls,html));
+  pushNews(sev,cls,html,kind){
+    this.news.unshift(this._newsEvent(sev,cls,html,kind));
     if(this.news.length>120)this.news.pop();
     UI.queueNews(sev>=4? {y:this.year(),html}:null);
   }
@@ -8717,7 +8718,7 @@ class Sim {
     c.log.unshift({y:this.year(), what});
     if(c.log.length>14) c.log.pop();
     if((weight||0)>=2){
-      this.pushNews(weight>=3?3:2,'norm',`<b>${m.name}</b> — ${what}`);
+      this.pushNews(weight>=3?3:2,'norm',`<b>${m.name}</b> — ${what}`,'person');   // 인물 소식 — 기본 목록에선 숨긴다
       if(weight>=3) this.chron(`${m.name}: ${what}`);
     }
   }
@@ -15233,7 +15234,7 @@ class Sim {
       this.presLog.unshift({
         // 누적 막대용 — 전 후보 득표율
         shares: [...votes.entries()].filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]).map(([id,v])=>{
-          const p=this.parties.find(q=>q.id===id); return {id, name:p?p.name:'?', color:p?p.color:'#888', pct:v/allT*100}; }),
+          const p=this.parties.find(q=>q.id===id); return {id, name:p?p.name:'?', color:p?p.color:'#888', pct:v/allT*100, lr:p? this.lr(p.cent) : 0}; }),
         // 선거인단 요약 — 역대 비교·주 이동용
         ec: ecRec? { mode:ecRec.mode, total:ecRec.ecTotal, need:ecRec.need, winner:ecRec.winner,
           rows:(ecRec.rows||[]).map(r=>({id:r.id, name:r.name, color:r.color, ev:r.ev})),
@@ -22931,9 +22932,10 @@ Object.assign(UI, {
       bar.style.cssText='display:flex;flex-wrap:wrap;gap:4px;padding:6px 12px 0 12px';
       list.parentNode.insertBefore(bar, list);
       bar.onclick=e=>{ const b=e.target.closest('[data-nf]'); if(!b) return; this._newsFilter=b.dataset.nf; this.renderNews(); }; }
-    const K=[['all','전부'],['big','큰 사건'],['election','선거'],['party','정당'],['gov','정부'],['const','헌법'],['crisis','위기']];
+    const K=[['all','전부'],['big','큰 사건'],['election','선거'],['party','정당'],['gov','정부'],['const','헌법'],['crisis','위기'],['person','인물']];
     bar.innerHTML=K.map(([k,l])=>`<button class="cOpt${F===k?' on':''}" data-nf="${k}" style="padding:2px 8px;font-size:10.5px">${l}</button>`).join('');
-    const pass=n=> F==='all' || (F==='big'? (n.sev||0)>=3 : (n.kind||'etc')===F);
+    // 인물 소식(계파 수장·당대표 취임 등)은 양이 많아 다른 소식을 덮는다 — '인물'을 고를 때만 보인다
+    const pass=n=> F==='person'? n.kind==='person' : n.kind==='person'? false : F==='all' || (F==='big'? (n.sev||0)>=3 : (n.kind||'etc')===F);
     const rows=this.sim.news.filter(pass).slice(0,40);
     list.innerHTML= rows.length? rows.map(n=>
       `<div class="news ${n.cls==='pos'?'pos':n.cls}"><div class="nd">${n.y}년 ${n.m}월${(n.pids&&n.pids.length)? ' '+n.pids.map(id=>this.pdot(id,{mr:2})).join('') : ''}</div>${n.html}</div>`).join('')
@@ -24477,7 +24479,8 @@ Object.assign(UI, {
               <td class="num">${sh? sh.pct.toFixed(1)+'%':'—'}</td><td>${note}</td></tr>`; }).join('')
         + '</tbody></table>';
       h+=this._stackRows(hist.slice().reverse().map(r=>({label:r.y+'년',
-        segs:(r.ec.rows||[]).slice().sort((a,b)=>b.ev-a.ev).map(x=>({name:x.name, color:x.color, pct:x.ev/r.ec.total*100}))})),
+        segs:(r.ec.rows||[]).slice().sort((a,b)=>{ const la=s.parties.find(q=>q.id===a.id), lb=s.parties.find(q=>q.id===b.id);
+          return (la? s.lr(la.cent):0)-(lb? s.lr(lb.cent):0); }).map(x=>({name:x.name, color:x.color, pct:x.ev/r.ec.total*100}))})),
         '역대 선거인단 구성');
     }
     return h;
@@ -24488,7 +24491,8 @@ Object.assign(UI, {
     const s=this.sim;
     const log=(s.presLog||[]).filter(r=>r.y<=y && r.shares && r.shares.length).slice(0,12).reverse();
     if(log.length<2) return '';
-    return this._stackRows(log.map((r,k)=>({label:r.y+'년', segs:r.shares,
+    const lrOf=x=>{ if(x.lr!=null) return x.lr; const p=s.parties.find(q=>q.id===x.id); return p? s.lr(p.cent) : 0; };
+    return this._stackRows(log.map((r,k)=>({label:r.y+'년', segs:r.shares.slice().sort((a,b)=>lrOf(a)-lrOf(b)),
       note: r.turnover? '<span style="color:#ff8c42">교체</span>' : k===0 && !r.terms? '—' : '<span style="color:var(--tx3)">유지</span>'})), '역대 대선 득표율');
   },
 
@@ -24499,7 +24503,8 @@ Object.assign(UI, {
     const list=(s.elections||[]).slice(Math.max(0,idx-11), idx+1);
     if(list.length<2) return '';
     return this._stackRows(list.map(e=>{ const T=e.total||e.results.reduce((a,r)=>a+r.seats,0)||1;
-      return {label:e.y+'년', segs:e.results.filter(r=>r.seats).slice().sort((a,b)=>b.seats-a.seats).map(r=>({name:r.name, color:r.color, pct:r.seats/T*100}))}; }),
+      // 좌→우 이념 순 — 의회 반원과 같은 배치. 의석순으로 놓으면 해마다 색 자리가 뒤바뀐다
+      return {label:e.y+'년', segs:e.results.filter(r=>r.seats).slice().sort((a,b)=>(a.lr??0)-(b.lr??0)).map(r=>({name:r.name, color:r.color, pct:r.seats/T*100}))}; }),
       '역대 총선 의석률');
   },
 
