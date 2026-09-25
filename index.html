@@ -3183,8 +3183,27 @@ class Sim {
 
   year(){ return 1+Math.floor(this.tick/12); }
   month(){ return 1+this.tick%12; }
+  // 뉴스 = 구조화된 사건 + 표시용 HTML.
+  // 호출부 263곳은 그대로 두고, 여기서 한 번에 종류·관련 정당·순수 텍스트를 뽑는다.
+  // UI는 종류로 거르고, 정당 id로 엠블럼을 붙이고, 문서는 텍스트를 재사용할 수 있다.
+  static NEWS_KINDS = [
+    ['election', /총선|대선|선거|개표|득표|당선|결선|선거인단|여론조사/],
+    ['party',    /창당|분당|합당|탈당|흡수|해산|복당|입당|노선|예비선거|공천|물갈이|계파|포괄정당|카르텔/],
+    ['gov',      /연정|내각|정부|총리|대통령|불신임|거부권|탄핵|의회 해산/],
+    ['const',    /개헌|헌법|국민투표|봉쇄조항|선거제/],
+    ['crisis',   /쿠데타|혁명|내전|전쟁|비상|폭동|시위|위기|계엄|테러/],
+    ['econ',     /경제|실업|물가|재정|GDP|성장|불황|호황/],
+  ];
+  _newsEvent(sev,cls,html){
+    const text=String(html||'').replace(/<[^>]+>/g,'');
+    let kind='etc';
+    for(const [k,re] of Sim.NEWS_KINDS) if(re.test(text)){ kind=k; break; }
+    const pids=[];
+    for(const p of this.parties){ if(p.name && p.name.length>=2 && text.includes(p.name) && pids.length<4) pids.push(p.id); }
+    return {y:this.year(), m:this.month(), sev, cls, html, text, kind, pids};
+  }
   pushNews(sev,cls,html){
-    this.news.unshift({y:this.year(),m:this.month(),sev,cls,html});
+    this.news.unshift(this._newsEvent(sev,cls,html));
     if(this.news.length>120)this.news.pop();
     UI.queueNews(sev>=4? {y:this.year(),html}:null);
   }
@@ -4453,6 +4472,14 @@ class Sim {
   }
 
   // ── 여론조사: 선거 6개월 전부터 매달, 오차 포함 ──
+  // 무소속 가상 정당(-2) — 만드는 곳은 여기 한 곳뿐이다
+  _ensureInd(){
+    let ind=this.parties.find(p=>p.id===-2);
+    if(!ind){ ind={id:-2,name:'무소속',color:'#9aa8c4',cent:new Float64Array(6),rad:0.2,support:0,seats:0,
+      founded:this.year(),lowStreak:0,home:-1,factions:null,leader:null}; this.parties.push(ind); }
+    return ind;
+  }
+
   canCreateParty(){
     if(this.partyLock) return false;
     // 진입 비용 — 유효 봉쇄선이 높고 등록 요건이 무거울수록 새 당을 만들 엄두를 못 낸다.
@@ -4481,8 +4508,7 @@ class Sim {
     if(heir && heir!==p){ heir.seats=(heir.seats||0)+n; heir.dSeats=(heir.dSeats||0)+(p.dSeats||0); heir.pSeats=(heir.pSeats||0)+(p.pSeats||0); }
     else {
       let ind=this.parties.find(q=>q.id===-2);
-      if(!ind){ ind={id:-2,name:'무소속',color:'#9aa8c4',cent:new Float64Array(6),rad:0.2,support:0,seats:0,
-        founded:this.year(),lowStreak:0,home:-1,factions:null,leader:null}; this.parties.push(ind); }
+      if(!ind) ind=this._ensureInd();
       ind.seats=(ind.seats||0)+n;
     }
     if(this.markSeatChange) this.markSeatChange(p.id, -n, why||'정당 소멸', heir? heir.name : '무소속');
@@ -4619,6 +4645,11 @@ class Sim {
   //    한 사람이 두 당 대표를 겸하고 있으면 나중 당의 자리를 비운다.
   // ② 합당·흡수·해산으로 사라진 정당이 여당 목록에 남는다. 승계한 당으로 바꾸고 없으면 뺀다.
   syncAffiliations(){
+    // 죽거나 은퇴한 사람은 그 틱에 바로 자리에서 내린다 (예전엔 1년 주기 정리라 몇 달 남아 있었다)
+    for(const p of this.parties){
+      if(p.leader && (p.leader.dead||p.leader.retired)) p.leader=null;
+      if(p.factions) for(const f of p.factions) if(f.leader && (f.leader.dead||f.leader.retired)) f.leader=null;
+    }
     const owner=new Map();
     for(const p of this.parties){
       const L=p.leader; if(!L) continue;
@@ -4658,7 +4689,7 @@ class Sim {
         this.senate=[...sum.entries()].filter(([,n])=>n>0).map(([id,seats])=>({id,seats}));
         if(Array.isArray(this.senClassSeats)) for(const cm of this.senClassSeats) fix(cm);
         if(sum.has(-2) && !this.parties.some(p=>p.id===-2))
-          this.parties.push({id:-2,name:'무소속',color:'#9aa8c4',cent:new Float64Array(6),rad:0.2,support:0,seats:0,founded:this.year(),lowStreak:0,home:-1,factions:null,leader:null});
+          this._ensureInd();
       }
     }
   }
@@ -7683,7 +7714,7 @@ class Sim {
           return b? {key:b.key, name:b.name, desc:b.desc, by:d.by, core:false} : null; }).filter(Boolean),
         rounds:0, support:0,
       };
-      this.pushNews(3,'sev2',`<b>개헌 논의 착수</b> — ${pick0.by}이(가) <b>${lead.name}</b>을 요구한다`);
+      this.pushNews(3,'sev2',`<b>개헌 논의 착수</b> — ${pick0.by}${this._josa(pick0.by,'이','가')} <b>${lead.name}</b>${this._josa(lead.name,'을','를')} 요구한다`);
       this.chron(`개헌 논의: ${lead.name}`);
       return;
     }
@@ -12198,16 +12229,8 @@ class Sim {
     return sc;
   }
 
-  // ── ⑤ 결선 진출 문턱식 (프랑스) ──
-  runoffQualifiers(arr, cast, sys){
-    const d=(sys&&sys.dist)||{};
-    if(d.runoffMode!=='threshold') return arr.slice(0, d.runoffTop||2);
-    const bar=(d.runoffBar??0.125)*cast;
-    const q=arr.filter(([,v])=>v>=bar);
-    // 아무도 못 넘으면 상위 2인
-    if(q.length<2) return arr.slice(0,2);
-    return q.slice(0,4);                            // 최대 4자 대결
-  }
+  // runoffQualifiers는 10-syscore.js 하나만 둔다. 여기 있던 (arr, cast, sys) 판이 이름이 같아
+  // 파이프라인의 (sorted, sys, eligible) 판을 덮어써, 문턱식 결선이 항상 상위 2인으로 빠졌다.
 
 
 
@@ -12931,12 +12954,7 @@ class Sim {
   // 둘 다 인물 투표 유인 × (1 − 정당 제도화)에 비례한다. 국가 이름은 없다.
   // 폐쇄명부 비례엔 지역구가 없어 생기지 않고, 개방 예비선거 체계에선 토호가 예비선거로 흡수된다.
 
-  _ensureInd(){
-    let ind=this.parties.find(p=>p.id===-2);
-    if(!ind){ ind={id:-2,name:'무소속',color:'#9aa8c4',cent:new Float64Array(6),rad:0.2,support:0,seats:0,
-      founded:this.year(),lowStreak:0,home:-1,factions:null,leader:null}; this.parties.push(ind); }
-    return ind;
-  }
+
 
   // 선거구별 후견주의 지수
   _clientelism(nd){
@@ -13046,6 +13064,8 @@ class Sim {
     this._ensureInd();
     let added=0;
     this._notableRun=new Map(); this._notableRunD=new Map();
+    // 당선 표시는 선거마다 새로 판정한다 — 출마하지 못한(선거구 획정 변경 등) 인물이 영원히 '재직 중'으로 남던 구멍
+    for(const x of this.notables) x.seated=false;
     for(const x of this.notables){
       if(x.d>=dTally.length) continue;
       const t=dTally[x.d]; let tot=0; t.forEach(v=>{ if(v>0) tot+=v; }); if(tot<=0) continue;
@@ -13498,7 +13518,7 @@ class Sim {
       // 유리할 때 해산해 조기 총선을 노린다(전략적 해산)
       const adv = lead? clamp((lead.support||0)*3-0.9, 0, 1) : 0;
       const toElec=this.elecInterval-(this.tick-this.lastElection);
-      if(toElec>12 && rnd() < (adv*0.030 + (this.gridlock?0.045:0) + 0.004)) this.dissolveParliament();
+      if(toElec>12 && rnd() < (adv*0.030 + (this.gridlock?0.045:0) + 0.004)) this.powerDissolve();
     }
 
     // ── 해제 판단 ──
@@ -13562,8 +13582,9 @@ class Sim {
     E.war=false;
     this.pushNews(3,'pos','<b>비상사태 해제</b>');
   }
-  // ── 의회 해산 ──
-  dissolveParliament(){
+  // ── 의회 해산 (비상대권 보유자) ──
+  // 예전엔 정부 모듈의 dissolveParliament와 이름이 같아 빌드 순서상 이 함수가 통째로 덮여 있었다.
+  powerDissolve(){
     const E=this.emergency; if(!E) return;
     const who=this.emergencyHolder('dissolve');
     E.dissolved++;
@@ -13628,135 +13649,6 @@ class Sim {
   // 의회가 정지됐는가 — 다른 모듈이 물어본다
   get parliamentSuspended(){
     return !!(this.emergencyOn && this.emergency && this.emergency.suspended);
-  }
-  // ════════ 뒤베르제 법칙 ════════
-  //
-  // 실측에서 소선거구 300석인데 정당이 30개였다. 의석은 수렴했으나
-  // (ENP 1.53) 정당 수는 줄지 않았다.
-  //
-  // 원인은 두 가지였다:
-  //   ① 자연 소멸 로직이 아예 없었다. 정당은 흡수 합당으로만 사라졌다.
-  //   ② lowStreak이 초기화만 되고 증가하지 않는 죽은 변수였다.
-  //
-  // 뒤베르제 법칙은 기계적 효과(의석 배분)와 심리적 효과(전략 투표)로
-  // 이루어진다. 기계적 효과는 작동했으나 심리적 효과가 빠져 있었다.
-
-  // ── 심리적 효과: 당선 가능성이 없으면 표가 떠난다 ──
-  // 선거구 정수가 작을수록 강하게 작동한다.
-  duvergerPenalty(p){
-    if(!this.duvergerOn || !p || p.id<0) return 0;
-    const S=this.readSystem? this.readSystem() : null;
-    if(!S) return 0;
-    // 유효 정수 — 비례 비중이 클수록 사표 걱정이 준다
-    const mode=S.tier.mode;
-    let M;
-    if(mode==='proportional') M=this.totalSeats*0.5;
-    else if(mode==='mixed'){
-      const dm=S.dist.mag||1;
-      M = dm*(S.tier.districtShare??0.6) + this.totalSeats*0.3*(1-(S.tier.districtShare??0.6));
-    } else M=S.dist.mag||1;
-    // 봉쇄조항도 심리적 문턱이다
-    const bar=(S.prop.threshold||0)/100;
-    // 당선에 필요한 대략의 득표(드룹 근사)
-    const need = Math.max(bar, 1/(M+1));
-    const sup = p.support||0;
-    if(sup >= need*1.35) return 0;                 // 충분히 넘으면 무압력
-    // 문턱에 못 미칠수록 페널티. 정수가 작을수록 가파르다.
-    const short = clamp((need*1.35 - sup)/(need*1.35), 0, 1);
-    // 비례제에서도 봉쇄조항이 심리적 문턱으로 작동해야 한다.
-    // 하한이 없으면 steep가 0.008이 되어 군소정당이 무한 증식한다(ENP 16).
-    const steep = clamp(1.15/(M+0.5), 0.30, 0.95);
-    return short*short*steep;
-  }
-
-  // ── 자연 소멸 ──
-  stepPartyDecline(){
-    if(!this.duvergerOn) return;
-    if(this.tick%12!==0) return;
-    const T=this.totalSeats;
-    const S=this.readSystem? this.readSystem() : null;
-    const propish = S && (S.tier.mode==='proportional' ||
-      (S.tier.mode==='mixed' && (S.tier.districtShare??0.6)<0.45));
-
-    // ── 과밀 압력 ──
-    // 비례제라도 정당이 무한히 늘지는 않는다. 유권자의 인지 한계와
-    // 연정 협상 비용이 통합을 강제한다(사르토리의 '분극적 다당제' 한계).
-    const alive=this.parties.filter(q=>q.id>=0);
-    const crowd = clamp((alive.length-9)/12, 0, 1);   // 9개 넘으면 압력 시작
-
-    for(const p of this.parties){
-      if(p.id<0) continue;
-      if(p.lowStreak===undefined) p.lowStreak=0;
-      const sup=p.support||0, share=(p.seats||0)/T;
-      // 실패 판정 — 의석이 없거나, 득표에 비해 의석이 턱없이 적다
-      // 지역 기반 정당은 전국 지지가 낮아도 살아남는다(스코틀랜드 SNP형)
-      const regional = p.regAff && Math.max(...p.regAff)>0.45;
-      // 과밀할수록 살아남는 문턱이 올라간다
-      const bar0 = 0.11 + crowd*0.06;
-      const bar1 = 0.06 + crowd*0.05;
-      // 비례제에서는 share ≈ sup이라 '득표 대비 손해' 조건이 결코 걸리지 않는다.
-      // 절대 규모로도 판정해야 한다 — 20당 체제에서 3%는 주변 정당이다.
-      const tiny = sup < (0.045 + crowd*0.055);
-      const failing = (p.seats||0)===0
-        ? (sup<bar0 && !regional)
-        : ((tiny || (share < sup*0.30 && sup<bar1)) && !regional);
-      if(failing) p.lowStreak++;
-      else p.lowStreak=Math.max(0, p.lowStreak-2);
-
-      // 소멸 — 연속 실패가 쌓이면 해산한다.
-      // 비례제에서는 군소정당이 살아남을 수 있으므로 문턱을 높인다.
-      const limit = Math.max(3, Math.round((propish? 7 : 4) - crowd*3));
-      if(p.lowStreak>=limit && this.parties.filter(q=>q.id>=0).length>2){
-        this.dissolveParty(p, '지지 기반 상실');
-        continue;
-      }
-      // 조기 경고
-      if(p.lowStreak===limit-1 && (p.seats||0)===0)
-        this.pushNews(2,'norm', `<b>${p.name}</b>, 해산 위기 — 원내 진입에 거듭 실패했다`);
-    }
-  }
-
-  // 해산 — 지지자는 가장 가까운 정당으로 간다(탄압과 달리 원한이 남지 않는다)
-  dissolveParty(p, why){
-    if(!p || p.id<0) return;
-    const alive=this.parties.filter(q=>q.id>=0 && q!==p);
-    if(alive.length<2) return;
-    // 이념이 가장 가까운 정당
-    let heir=null, bd=1e9;
-    for(const q of alive){
-      const d=this.partyDist(p.cent, q);
-      if(d<bd){ bd=d; heir=q; }
-    }
-    let moved=0;
-    for(let i=0;i<N;i++){
-      if(this.party[i]!==p.id) continue;
-      // 가까운 정당이 있으면 넘어가고, 멀면 무당층이 된다
-      if(heir && bd<1.4 && rnd()<0.62){ this.party[i]=heir.id; moved++; }
-      else this.party[i]=-1;
-      this.trust[i]=clamp(this.trust[i]-0.02);
-    }
-    const lg=(this.partyLog||[]).find(l=>l.pid===p.id && !l.died);
-    if(lg) lg.died=this.year();
-    if(heir){
-      if(!heir.absorbed) heir.absorbed=[];
-      heir.absorbed.push({id:p.id, name:p.name, y:this.year(), seats:p.seats||0, founded:p.founded});
-    }
-    // 흡수한 당이 있으면 의원도 따라간다, 없으면 무소속
-    if(this._vacateSeats) this._vacateSeats(p, (typeof heir!=='undefined'? heir : null), '흡수 소멸');
-    this.parties.splice(this.parties.indexOf(p),1);
-    this.govCoalition=this.govCoalition.filter(g=>g!==p.id);
-    if(this.alliances) for(const a of this.alliances) a.members=a.members.filter(m=>m!==p.id);
-    this.pushNews(2,'norm',
-      `<b>${p.name} 해산</b> — ${why}${heir&&moved? `. 지지자 상당수가 ${heir.name}으로 옮겨갔다`:''}`);
-    this.chron(`${p.name} 해산`);
-  }
-
-  duvergerStatus(){
-    if(!this.duvergerOn) return null;
-    return this.parties.filter(p=>p.id>=0).map(p=>({
-      name:p.name, color:p.color, seats:p.seats||0, support:p.support||0,
-      penalty:this.duvergerPenalty(p), streak:p.lowStreak||0,
-    })).sort((a,b)=>b.support-a.support);
   }
   // ════════ 선거인단 · 의무투표 ════════
 
@@ -15111,11 +15003,13 @@ class Sim {
       // 조별 개선: 주 r의 j번째 의석은 (r+j) mod K 조에 속한다.
       // 미국처럼 주마다 2석이고 3조면, 한 주는 3번 중 2번만 선거를 치르고 한 번은 쉰다.
       const K=this.senClasses, kUp=this.senateClass % K;
-      this._senFedUp = K>1? new Map() : null;
-      if(K>1) for(let r=0;r<NREG;r++){
-        let up=0; for(let j=0;j<stateSeats[r];j++) if((r+j)%K===kUp) up++;
-        allocState(r, up, this._senFedUp);
+      // 조마다 따로 뽑아둔다 — 처음 상원을 채울 때 세 조 모두에 이번 조의 의석을 복사하던 구멍이 있었다
+      this._senFedByClass = K>1? Array.from({length:K},()=>new Map()) : null;
+      if(K>1) for(let k=0;k<K;k++) for(let r=0;r<NREG;r++){
+        let up=0; for(let j=0;j<stateSeats[r];j++) if((r+j)%K===k) up++;
+        allocState(r, up, this._senFedByClass[k]);
       }
+      this._senFedUp = K>1? this._senFedByClass[kUp] : null;
       this._senStateSeats=stateSeats;
       for(let r=0;r<NREG;r++){ const per=stateSeats[r]; if(per<=0)continue;
         const arr=[...reg[r].entries()].sort((a,b)=>b[1]-a[1]); if(!arr.length)continue;
@@ -15136,7 +15030,7 @@ class Sim {
     const kUp=this.senateClass % K;
     const fresh=k=>{
       // FEDERAL은 주별로 이미 이번 조 의석을 뽑아뒀다
-      if(C.senate==='FEDERAL' && this._senFedUp && K>1) return new Map(this._senFedUp);
+      if(C.senate==='FEDERAL' && this._senFedByClass && K>1) return new Map(this._senFedByClass[k]);
       const ids=[...alloc.keys()].filter(id=>(alloc.get(id)||0)>0);
       const al=this.apportion(ids.map(id=>alloc.get(id)), sizes[k]);
       const m=new Map(); ids.forEach((id,i)=>{ if(al[i]) m.set(id, al[i]); }); return m;
@@ -15152,13 +15046,17 @@ class Sim {
       for(const cm of this.senClassSeats) for(const [id,n] of [...cm.entries()])
         if(id!==-2 && !this.parties.some(p=>p.id===id)){ cm.delete(id); cm.set(-2,(cm.get(-2)||0)+n); }
     }
+    { let tot=0; for(const cm of this.senClassSeats) cm.forEach(v=>tot+=v);
+      if(tot<T){ const cm=this.senClassSeats[kUp]||this.senClassSeats[0];
+        let top=null, tv=-1; cm.forEach((v,id)=>{ if(v>tv){tv=v;top=id;} });
+        if(top!=null) cm.set(top, cm.get(top)+(T-tot)); } }
     this.senateClassUp = K>1? kUp : null;
     this.senateClass++;
     const sum=new Map();
     for(const cm of this.senClassSeats) cm.forEach((n,id)=>sum.set(id,(sum.get(id)||0)+n));
     let next=[...sum.entries()].map(([id,seats])=>({id, seats}));
     if(sum.has(-2) && !this.parties.some(p=>p.id===-2)){
-      this.parties.push({id:-2,name:'무소속',color:'#9aa8c4',cent:new Float64Array(6),rad:0.2,support:0,seats:0,founded:this.year(),lowStreak:0,home:-1,factions:null,leader:null});
+      this._ensureInd();
     }
     // 총합을 senSeats에 정확히 맞춤
     let stot=next.reduce((a,x)=>a+x.seats,0);
@@ -15311,15 +15209,20 @@ class Sim {
         ecWin: !!ecRec, popLost: !!(ecRec && first[1] && first[1].v>topPct) };
       this.pushNews(3,'norm',`<b>대선</b> — ${win.name} 후보 당선 (${topPct.toFixed(0)}%${C.presRunoff?', 1차 과반':' 단순다수'})`);
     }
-    // 연임 제한: 같은 인물이 제한 횟수를 채웠으면 당대표가 교체된다
+    // 연임 제한 — 정당이 아니라 '사람' 기준이다.
+    // 예전엔 대통령 기록에 사람을 저장하지 않아(president.leader가 늘 비어) 제한이 한 번도 집행되지 않았다.
+    // president.terms는 정당의 연속 집권 횟수, personTerms가 그 사람의 재임 횟수다.
     const limit = C.presLimit||0;
-    if(limit>0 && this.president && this.president.pid===win.id && this.president.leader){
-      const terms=(this.president.terms||1);
-      if(terms>=limit){
-        this.pushNews(2,'norm',`<b>${this.president.leader.name}</b> 대통령, 연임 제한으로 퇴임 — ${win.name} 새 후보 승계`);
-        if(this.president.leader) this.president.leader.office=null;
-        if(win.leader===this.president.leader) win.leader=null;   // 새 지도부가 뽑히게 둔다
-      }
+    const P0 = this.president;
+    const incLid = P0? P0.lid : null;
+    const sameLeader = P0 && P0.pid===win.id && incLid!=null && win.leader && win.leader.lid===incLid;
+    if(limit>0 && sameLeader && (P0.personTerms||1)>=limit){
+      const out=win.leader;
+      // 같은 당의 다른 계파 수장을 후보로 — 없으면 새 지도부가 뽑히게 비운다
+      const alt=(win.factions||[]).map(f=>f.leader).find(L=>L && L!==out && !L.dead && !L.retired);
+      win.leader = alt || null;
+      if(out) out.office=null;
+      this.pushNews(2,'norm',`<b>${out.name}</b> 대통령, 연임 제한(${limit}회)으로 출마 불가 — ${win.name}은 ${alt? alt.name+' 후보로' : '새 후보로'} 정권을 이었다`);
     }
     const sameParty = prev===win.id;
     // 대선 이력 — 문서에서 추이를 쓰려면 기록이 필요하다
@@ -15368,7 +15271,9 @@ class Sim {
       });
       if(this.presLog.length>40) this.presLog.pop();
     }
-    this.president={pid:win.id, since:this.year(), terms: sameParty? ((this.president&&this.president.terms||1)+1) : 1};
+    const again = P0 && P0.pid===win.id && P0.lid!=null && win.leader && win.leader.lid===P0.lid;
+    this.president={pid:win.id, since:this.year(), terms: sameParty? ((this.president&&this.president.terms||1)+1) : 1,
+      lid: win.leader? win.leader.lid : null, personTerms: again? (P0.personTerms||1)+1 : 1};
     this.lastPresElection=this.tick;
     // ── 대선 승리 → 정권 교체 ──
     // 지금까지 행정부 구성은 총선(election) 안에서만 일어났다. 그래서 대선이
@@ -17310,7 +17215,8 @@ class Sim {
   }; }
   applyPresetNation(key, seedParties){
     this._bornGrace=this.tick+2;   // 프리셋이 만든 정당은 처음부터 있던 것으로 본다
-    const P=Sim.PRESETS[key]; if(!P)return;
+    const P=Sim.PRESETS[key];
+    if(!P){ console.warn('POLIS: 없는 프리셋 키', key); this._badPreset=key; return false; }
     this.govForm=P.form; this.president=null; this.monarch=null; this.king=null; this.gridlock=false; this.cohabitation=false;
     Object.assign(this.con, {method:'PR',lowerSeats:300,districtRatio:0.67,threshold:5,sntvMag:4,term:4,voteAge:18,majority:0.5,nomination:'top',prMethod:'hare',renewHalf:false,senate:'NONE',senSeats:100,senTerm:6,senRenew:false,senPower:0.5,presTerm:0,presLimit:0,presOffset:0}, P.con);
     // 선거인단은 Sim 플래그라 con에 넣는 것만으로는 켜지지 않는다 — 프리셋에 없으면 끈다
@@ -22040,7 +21946,7 @@ Object.assign(UI, {
     }
     host.innerHTML=html;
     host.querySelectorAll('[data-ppl]').forEach(el=>{
-      el.onclick=()=>{ const m=(s.mps||[]).find(x=>x.name===el.dataset.ppl); if(m) this.showPolitician(m); };
+      el.onclick=()=>{ const m=(s.mps||[]).find(x=>x.name===el.dataset.ppl); if(m) this.showMPDossier(m); };
     });
   },
   renderMedia(){
@@ -23008,10 +22914,30 @@ Object.assign(UI, {
       ||'<div class="muted">아직 기록된 사건이 없다.</div>';
   },
 
+  // ── 공용 부품: 정당 점 — data-pid를 달아 엠블럼이 색이 아니라 id로 정당을 찾게 한다 ──
+  pdot(pid, o){
+    o=o||{}; const s=this.sim;
+    const p=s.parties.find(q=>q.id===pid);
+    const col=o.color || (p? p.color : '#888');
+    const tag=o.tag||'span';
+    return `<${tag} class="pdot" data-pid="${pid}" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${col};margin-right:${o.mr??4}px;flex-shrink:0"></${tag}>`;
+  },
   renderNews(){
     const list=$('#newsList');
-    list.innerHTML=this.sim.news.slice(0,40).map(n=>
-      `<div class="news ${n.cls==='pos'?'pos':n.cls}"><div class="nd">${n.y}년 ${n.m}월</div>${n.html}</div>`).join('');
+    // 분류 필터 — 엔진이 남긴 구조화된 사건의 종류로 거른다
+    const F=this._newsFilter||'all';
+    let bar=$('#newsFilter');
+    if(!bar){ bar=document.createElement('div'); bar.id='newsFilter';
+      bar.style.cssText='display:flex;flex-wrap:wrap;gap:4px;padding:6px 12px 0 12px';
+      list.parentNode.insertBefore(bar, list);
+      bar.onclick=e=>{ const b=e.target.closest('[data-nf]'); if(!b) return; this._newsFilter=b.dataset.nf; this.renderNews(); }; }
+    const K=[['all','전부'],['big','큰 사건'],['election','선거'],['party','정당'],['gov','정부'],['const','헌법'],['crisis','위기']];
+    bar.innerHTML=K.map(([k,l])=>`<button class="cOpt${F===k?' on':''}" data-nf="${k}" style="padding:2px 8px;font-size:10.5px">${l}</button>`).join('');
+    const pass=n=> F==='all' || (F==='big'? (n.sev||0)>=3 : (n.kind||'etc')===F);
+    const rows=this.sim.news.filter(pass).slice(0,40);
+    list.innerHTML= rows.length? rows.map(n=>
+      `<div class="news ${n.cls==='pos'?'pos':n.cls}"><div class="nd">${n.y}년 ${n.m}월${(n.pids&&n.pids.length)? ' '+n.pids.map(id=>this.pdot(id,{mr:2})).join('') : ''}</div>${n.html}</div>`).join('')
+      : '<div class="muted" style="font-size:11px;padding:8px">이 분류의 소식이 아직 없다.</div>';
   },
   renderTicker(){
     const s=this.sim,S=s.S;
@@ -24386,7 +24312,7 @@ Object.assign(UI, {
             if(fl.has(st.reg)) notes.push(`<span style="color:#ff8c8c">반란 ${fl.get(st.reg).length}</span>`);
             const who = ec.mode==='prop'
               ? (st.alloc||[]).map(a=>`<span style="color:${col(a.id)}">${nm(a.id).slice(0,6)} ${a.ev}</span>`).join(' · ')
-              : `<span class="pdot" style="display:inline-block;background:${col(st.win)};margin-right:4px"></span>${nm(st.win)}`;
+              : `${this.pdot(st.win)}${nm(st.win)}`;
             return `<tr${st===tip?' style="background:rgba(232,163,61,0.10)"':''}><td>${rn(st.reg)}</td><td class="num">${st.ev}</td>
               <td>${who}</td><td class="num">${st.pct.toFixed(1)}%</td>
               <td class="num" style="${st.swing?'color:#e8a33d':''}">${st.margin.toFixed(1)}%p</td><td>${notes.join(' ')}</td></tr>`; }).join('')
@@ -24415,7 +24341,7 @@ Object.assign(UI, {
       h+=`<div class="prSec">선거인 투표 — ${ec.rounds.length}차${ec.rounds.length>1?' · 최하위 사퇴 후 재투표':''}</div>
         <div style="overflow-x:auto"><table class="wkT" style="font-size:10.5px"><thead><tr><th style="text-align:left">후보</th>`
         + ec.rounds.map((_,k)=>`<th>${k+1}차</th>`).join('') + '</tr></thead><tbody>'
-        + ids.map(id=>`<tr><td><span class="pdot" style="display:inline-block;background:${col(id)};margin-right:4px"></span>${nm(id)}</td>`
+        + ids.map(id=>`<tr><td>${this.pdot(id)}${nm(id)}</td>`
             + ec.rounds.map((r,k)=>{ const e=r.tally.find(x=>x[0]===id);
                 if(!e) return '<td class="num" style="color:var(--tx3)">사퇴</td>';
                 const win=k===ec.rounds.length-1 && id===ec.winner;
@@ -24436,7 +24362,7 @@ Object.assign(UI, {
         <div class="mut10" style="margin-bottom:4px;line-height:1.6">선거인단 과반이 없어 하원이 상위 3명 중에서 뽑았다. 의원 수와 무관하게 주 대표단마다 1표다 — 인구 적은 주가 큰 주와 같은 힘을 가진다.</div>
         <div style="overflow-x:auto"><table class="wkT" style="font-size:10.5px"><thead><tr><th style="text-align:left">후보</th>`
         + C.rounds.map((_,k)=>`<th>${k+1}차</th>`).join('') + '</tr></thead><tbody>'
-        + ids.map(id=>`<tr><td><span class="pdot" style="display:inline-block;background:${col(id)};margin-right:4px"></span>${nm(id)}</td>`
+        + ids.map(id=>`<tr><td>${this.pdot(id)}${nm(id)}</td>`
             + C.rounds.map((r,k)=>{ const e=r.tally.find(x=>x[0]===id);
                 if(!e) return '<td class="num" style="color:var(--tx3)">탈락</td>';
                 return `<td class="num" style="${e[1]>=C.need?'color:var(--am);font-weight:700':''}">${e[1]}주</td>`; }).join('')
@@ -24494,9 +24420,9 @@ Object.assign(UI, {
     let h = asDoc? '' : `<div class="prSec" style="margin-top:10px">지난 총선(${prev.y}년) 대비 지역구 이동 — ${moved}곳 교체 · ${held}곳 수성</div>`;
     h+=`<table class="wkT" style="font-size:10.5px"><thead><tr><th style="text-align:left">잃은 당</th><th></th><th style="text-align:left">얻은 당</th><th>지역구</th></tr></thead><tbody>`
       + rows.slice(0,10).map(([k,n])=>{ const [a,b]=k.split('>').map(Number);
-          return `<tr><td><span class="pdot" style="display:inline-block;background:${col(a)};margin-right:4px"></span>${nm(a)}</td>
+          return `<tr><td>${this.pdot(a)}${nm(a)}</td>
             <td style="color:var(--tx3)">→</td>
-            <td><span class="pdot" style="display:inline-block;background:${col(b)};margin-right:4px"></span>${nm(b)}</td>
+            <td>${this.pdot(b)}${nm(b)}</td>
             <td class="num"><b>${n}</b></td></tr>`; }).join('')
       + '</tbody></table>';
     const netS=[...net.entries()].filter(([,v])=>v).sort((a,b)=>b[1]-a[1])
@@ -24764,7 +24690,7 @@ Object.assign(UI, {
     const sec=t=>`<div class="sect" style="margin-top:12px">${t}</div>`;
     const box=(t,c)=>`<div style="margin-top:6px;padding:6px 9px;border-radius:7px;background:${c||'rgba(120,150,210,0.08)'};border:1px solid rgba(130,170,255,0.18);font-size:10.5px;line-height:1.65">${t}</div>`;
     const row=(id,pct,right,dim,strike)=>`<div class="frow" style="padding:2px 0;${strike?'text-decoration:line-through;opacity:0.5':''}">
-        <div class="pdot" style="background:${col(id)}"></div>
+        ${this.pdot(id,{tag:"div"})}
         <span style="min-width:96px;color:var(--tx2)">${nm(id)}</span>
         <div class="bar" style="height:7px;max-width:110px;position:relative">
           <div style="width:${Math.min(100,pct)}%;height:100%;background:${col(id)};opacity:${dim?0.4:1}"></div></div>
@@ -24785,11 +24711,11 @@ Object.assign(UI, {
         h+=D.xfer.slice().sort((a,b)=>b.pct-a.pct).map(t=>{
           byTo.set(t.to,(byTo.get(t.to)||0)+t.pct*t.moved);
           return `<div class="frow" style="font-size:10.5px;padding:2px 0">
-            <div class="pdot" style="background:${col(t.id)}"></div>
+            ${this.pdot(t.id,{tag:"div"})}
             <span style="min-width:96px;color:var(--tx2)">${nm(t.id)}</span>
             <span class="mono3" style="min-width:40px">${t.pct.toFixed(1)}%</span>
             <span style="color:var(--tx3)">→</span>
-            <div class="pdot" style="background:${col(t.to)}"></div>
+            ${this.pdot(t.to,{tag:"div"})}
             <span style="color:var(--tx2)">${nm(t.to)}</span>
             <span class="mut" style="margin-left:auto">${(t.moved*100).toFixed(0)}% 이동 · ${((1-t.moved)*100).toFixed(0)}% 기권</span></div>`; }).join('');
         const gains=[...byTo.entries()].map(([id,g])=>`${nm(id)} +${g.toFixed(1)}%p`).join(' · ');
@@ -24821,7 +24747,7 @@ Object.assign(UI, {
         + L.map((_,k)=>`<th>${k+1}R</th>`).join('') + '</tr></thead><tbody>'
         + order.map(id=>{
             let out=false;
-            return `<tr><td><span class="pdot" style="display:inline-block;background:${col(id)};margin-right:4px"></span>${nm(id)}</td>`
+            return `<tr><td>${this.pdot(id)}${nm(id)}</td>`
               + L.map(r=>{
                   const st=r.standing.find(z=>z.id===id);
                   if(!st) return `<td class="num" style="color:var(--tx3)">—</td>`;
@@ -24899,7 +24825,7 @@ Object.assign(UI, {
       h+=box(`유권자는 한 명에게만 투표하고 득표 상위 ${x.mag}명이 당선된다. 정당은 몇 명을 낼지, 표를 어떻게 나눌지가 승부다.`
         + (lastWin&&firstLose? ` 커트라인은 마지막 당선자 ${lastWin.name}의 <b>${lastWin.pct.toFixed(1)}%</b>, 첫 낙선자 ${firstLose.name}와 ${(lastWin.pct-firstLose.pct).toFixed(2)}%p 차.`:''));
       h+=`<table class="wkT" style="font-size:10.5px;margin-top:6px"><thead><tr><th style="text-align:left">정당</th><th>후보</th><th>합계 득표</th><th>당선</th><th>균등 배분 시</th></tr></thead><tbody>`
-        + eff.sort((a,b)=>b.tot-a.tot).map(e=>`<tr><td><span class="pdot" style="display:inline-block;background:${col(e.pid)};margin-right:4px"></span>${nm(e.pid)}</td>
+        + eff.sort((a,b)=>b.tot-a.tot).map(e=>`<tr><td>${this.pdot(e.pid)}${nm(e.pid)}</td>
             <td class="num">${e.n}</td><td class="num">${e.tot.toFixed(1)}%</td><td class="num"><b>${e.won}</b></td>
             <td class="num" style="${e.could>e.won?'color:#e8a33d':''}">${e.could}${e.could>e.won?' ▲':''}</td></tr>`).join('')
         + '</tbody></table>';
@@ -24928,7 +24854,7 @@ Object.assign(UI, {
     const candLine=(id,pct,n,tag)=>{
       const person = n? `<b>${n.name}</b>${n.incumbent?' <span class="mut">(현역)</span>':' <span class="mut">(신인)</span>'} · `:'';
       return `<div style="display:flex;align-items:center;gap:8px;margin-top:6px">
-        <div class="pdot" style="background:${col(id)}"></div>
+        ${this.pdot(id,{tag:"div"})}
         <span>${person}${nm(id)}</span> <span style="font-family:var(--mono)">${pct.toFixed(1)}%</span>
         ${tag?`<span style="color:var(--am);font-size:10.5px">${tag}</span>`:''}</div>`;
     };
@@ -24947,7 +24873,7 @@ Object.assign(UI, {
       + x.all.map(a=>{
           const nn=nominee(a.id);
           return `<div class="frow">
-            <div class="pdot" style="background:${col(a.id)}"></div>
+            ${this.pdot(a.id,{tag:"div"})}
             <span style="min-width:92px;color:var(--tx2)">${nm(a.id)}</span>
             ${nn?`<span style="font-size:9.5px;color:var(--tx3);min-width:50px">${nn.name}</span>`:'<span style="min-width:50px"></span>'}
             <div class="bar" style="height:7px;max-width:88px">
@@ -24968,7 +24894,7 @@ Object.assign(UI, {
       + x.cands.map(c=>{
           const multi = (byParty.get(c.pid)||0) > 1;   // 같은 당에서 여럿 낸 경우
           return `<div class="frow">
-            <div class="pdot" style="background:${col(c.pid)}"></div>
+            ${this.pdot(c.pid,{tag:"div"})}
             <span style="min-width:84px;color:var(--tx2)">${nm(c.pid)}${multi?'<span style="color:var(--am)"> ●</span>':''}</span>
             <span style="font-size:9.5px;color:var(--tx3);min-width:74px">${c.name}</span>
             <span style="font-size:9px;color:${c.fac?'var(--cy)':'var(--tx3)'};min-width:44px">${c.fac||''}</span>
@@ -25971,7 +25897,8 @@ Object.assign(UI, {
     }
     this._modal('시민 한 명', html);
   },
-  showPolitician(m){
+  // 의원 신상 — 의원 객체를 받는다. (정치인 ID를 받는 showPolitician과 이름이 같아 덮여 있었다)
+  showMPDossier(m){
     const s=this.sim, d=s.politicianDossier(m); if(!d) return;
     const bar=(l,v,c)=>`<div style="display:flex;align-items:center;gap:7px;font-size:11px;padding:1.5px 0">
       <span style="min-width:48px;color:var(--tx3)">${l}</span>
@@ -27130,9 +27057,12 @@ window.addEventListener('DOMContentLoaded',()=>{
     const m=this.colMap();
     (root||document).querySelectorAll('.pdot:not([data-emb])').forEach(el=>{
       // 인라인 스타일 문자열에서 직접 읽는다 — 브라우저마다 background 축약형을 돌려주는 방식이 달라서
-      const st=el.getAttribute('style')||''; const mm=st.match(/background(?:-color)?\s*:\s*([^;]+)/i);
-      const c=normColor(mm? mm[1] : (el.style.backgroundColor||''));
-      const p=m.get(c); if(!p) return;
+      // data-pid가 있으면 id로 찾는다(공용 부품). 없는 옛 코드만 색으로 역추적한다
+      const dp=el.getAttribute('data-pid');
+      let p = dp!=null? UI.sim.parties.find(q=>String(q.id)===dp) : null;
+      if(!p){ const st=el.getAttribute('style')||''; const mm=st.match(/background(?:-color)?\s*:\s*([^;]+)/i);
+        p=m.get(normColor(mm? mm[1] : (el.style.backgroundColor||''))); }
+      if(!p) return;
       el.setAttribute('data-emb', p.id); el.innerHTML=this.emblem(p);
     });
   };
