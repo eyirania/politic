@@ -15630,12 +15630,14 @@ class Sim {
           }
         } }
       win=vr[r2[0]>=r2[1]?0:1];
+      this._presRecTick=this.tick;
       this._presRec={ mode:'runoff', unify:this._presUnify||[], ec:ecRec, finalists:vr.map((p,j)=>({id:p.id,name:p.name,color:p.color,votes:r2[j]})),
         first, winner:win.name, winColor:win.color, pct:Math.max(r2[0],r2[1])/(r2[0]+r2[1])*100,
         margin:Math.abs(r2[0]-r2[1])/(r2[0]+r2[1])*100 };
       this.pushNews(3,'norm',`<b>대선 결선</b> — ${win.name} 후보 당선 (${this._presRec.pct.toFixed(0)}%)`);
     } else {
       win=vr[0];
+      this._presRecTick=this.tick;
       this._presRec={ mode:'plurality', unify:this._presUnify||[], ec:ecRec, finalists:vr.map(p=>({id:p.id,name:p.name,color:p.color,votes:votes.get(p.id)||0})),
         first, winner:win.name, winColor:win.color, pct:topPct, margin:topPct-(first[1]?first[1].v:0),
         ecWin: !!ecRec, popLost: !!(ecRec && first[1] && first[1].v>topPct) };
@@ -16093,7 +16095,8 @@ class Sim {
             out.push([r, n, [...c.entries()].sort((a,b)=>b[1]-a[1]).slice(0,6).map(([id,v])=>[id, Math.round(v/n*1000)/10])]); }
           return out; })(),
         dTotal:this.parties.reduce((a,p)=>a+p.dSeats,0), pTotal:this.parties.reduce((a,p)=>a+p.pSeats,0),
-        total:T, pres:this._presRec||null, multiNom:this._mnStats||null, slates:(this._lastSlate||[]).slice(0,6),
+        total:T, pres:(this._presRec && this._presRecTick===this.tick)? this._presRec : null,   // 같은 날 치른 대선만 — 지난 단독 대선 기록이 따라붙지 않게
+        multiNom:this._mnStats||null, slates:(this._lastSlate||[]).slice(0,6),
         poll:this.lastPoll? this.lastPoll.vals.map(v=>({id:v.id,v:v.v})):null,
         results: (()=>{
           // 증감은 '직전 총선' 기준이어야 한다. 예전엔 선거 직전 의석(prevSeats)을 써서
@@ -19425,6 +19428,9 @@ const UI={
           else this.openPresident(ev.rec);
         }
       }
+      // 미뤄둔 속보 — 팝업이 다 닫히면 하나씩
+      if(this._toastQ && this._toastQ.length && !(this._evQ && this._evQ.length) && !this.anyPopupOpen()
+         && !this.sim.pageRec && !this.sim.presPageRec) this.bigToast(this._toastQ.shift());
       if(this.sim.tick>0 && this.sim.tick%240===0 && this._lastAutoSnap!==this.sim.tick){
         this._lastAutoSnap=this.sim.tick; this.takeSnap('자동');
       }
@@ -27655,6 +27661,12 @@ Object.assign(UI, {
   },
   queueNews(toast){ this._newsDirty=true; if(toast)this.bigToast(toast); },
   bigToast(t){
+    // 선거 결과·개표·결과 팝업이 대기 중이거나 열려 있으면 미뤄둔다 — 개표 전에 결과가 새어 나가지 않게
+    const S=this.sim;
+    if(S && (S.pageRec || S.presPageRec || S.senatePageRec || (this._evQ && this._evQ.length) || (this.anyPopupOpen && this.anyPopupOpen()))){
+      (this._toastQ||(this._toastQ=[])).push(t); if(this._toastQ.length>3) this._toastQ.shift();
+      return;
+    }
     let el=$('#bigToast');
     if(!el){ el=document.createElement('div'); el.id='bigToast';
       el.style.cssText='position:fixed;top:64px;left:50%;transform:translateX(-50%) translateY(-12px);z-index:70;max-width:min(460px,92vw);padding:13px 20px;border-radius:14px;background:rgba(20,12,18,0.96);border:1px solid rgba(255,90,90,0.45);box-shadow:0 8px 40px rgba(255,60,60,0.25);opacity:0;transition:all .35s;pointer-events:none;text-align:center';
