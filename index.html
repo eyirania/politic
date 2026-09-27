@@ -491,7 +491,7 @@ body.theme2 [style*="color:#ff6262"], body.theme2 [style*="color:#ff8c8c"]{ colo
 body.theme2 [style*="color:#e8a33d"]{ color:var(--warn) !important; }
 body.theme2 [style*="color:#5ae0b4"], body.theme2 [style*="color:#9dff5a"]{ color:var(--ok) !important; }
 /* 차트 툴팁 */
-#t2Tip{ position:fixed; z-index:99; pointer-events:none; display:none; padding:6px 9px; border-radius:6px; font-size:11.5px; line-height:1.55; color:#eaf2ff;
+#t2Tip{ position:fixed; z-index:99; pointer-events:none; display:none; max-width:220px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding:6px 9px; border-radius:6px; font-size:11.5px; line-height:1.55; color:#eaf2ff;
   background:rgba(10,16,34,0.96); border:1px solid rgba(130,170,255,0.30); box-shadow:0 6px 18px rgba(0,0,0,0.45); font-variant-numeric:tabular-nums; }
 #t2Tip i{ display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:5px; vertical-align:middle; }
 /* 정당 엠블럼 */
@@ -499,6 +499,20 @@ body.theme2 .pdot[data-emb]{ width:15px !important; height:15px !important; back
 body.theme2 .pdot[data-emb] svg{ width:15px; height:15px; }
 /* 지도 범례 상시 표시 */
 body.theme2 #mapLegend{ display:block !important; margin-top:6px; }
+</style>
+
+<style id="countCss">
+#countPage{position:fixed;inset:0;z-index:56;display:none;align-items:center;justify-content:center;background:rgba(4,8,20,0.72)}
+#countPage.show{display:flex;animation:fadeIn .25s}
+#countCard{width:min(640px,94vw);max-height:92vh;overflow:auto;background:#0b1224;border:1px solid rgba(130,170,255,0.28);border-radius:14px;padding:18px 20px;box-shadow:0 20px 50px rgba(0,0,0,0.5)}
+#countCard h2{margin:0 0 4px 0;font-size:18px;color:var(--cy,#54e0ff)}
+#cntProgBar{height:8px;border-radius:4px;background:rgba(255,255,255,0.08);overflow:hidden;margin:6px 0 2px 0}
+#cntProgBar>div{height:100%;background:linear-gradient(90deg,#54e0ff,#6fb6ff);transition:width .15s}
+#cntSeatBar{display:flex;height:22px;border-radius:5px;overflow:hidden;background:rgba(255,255,255,0.06);margin:8px 0 4px 0}
+#cntSeatBar>div{transition:width .15s;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;text-shadow:0 1px 2px #0009;white-space:nowrap;overflow:hidden}
+#cntFeed{font-size:11.5px;line-height:1.7;min-height:118px;margin-top:6px;border-top:1px solid rgba(130,170,255,0.14);padding-top:6px}
+#cntFeed .row{animation:fadeIn .3s}
+#cntBtns{display:flex;gap:8px;margin-top:10px}
 </style>
 </head>
 <body>
@@ -587,6 +601,7 @@ body.theme2 #mapLegend{ display:block !important; margin-top:6px; }
         <button class="btn" id="btnResetNew" style="width:100%;margin-bottom:9px;justify-content:flex-start">✦ 새 시뮬레이션</button>
         <div style="font-size:10px;color:var(--tx3);letter-spacing:1px;margin-bottom:5px">선거 상세 팝업</div>
         <label class="cChk" style="font-size:11px;margin-bottom:3px"><input type="checkbox" id="popLower" checked>하원 총선</label>
+        <label class="cChk" style="font-size:11px;margin-bottom:3px"><input type="checkbox" id="countOn" checked>개표 중계 (최대 속도에선 생략)</label>
         <label class="cChk" style="font-size:11px;margin-bottom:3px"><input type="checkbox" id="popSen">상원 선거</label>
         <label class="cChk" style="font-size:11px"><input type="checkbox" id="popPres" checked>대통령 선거</label>
       </div>
@@ -13141,6 +13156,167 @@ class Sim {
     const ind=this.parties.find(p=>p.id===-2);
     return { seats:ind? ind.seats||0 : 0, pool:(this.notables||[]).length, log:this.notableLog||{won:0,joined:0} };
   }
+  // ════════ 선거의 밤 ① — 스윙 · 풍향계 ════════
+  //
+  // 스윙(버틀러): 두 거대 정당 사이에서 표가 얼마나 옮겨갔나.
+  //   스윙 = ((A 이번 − A 지난) − (B 이번 − B 지난)) / 2      (+면 A 쪽으로)
+  // 균일 스윙 모형: 모든 지역구에서 같은 폭으로 표가 옮겨간다고 가정하고,
+  //   몇 %p 스윙이면 과반이 무너지는지, 제1당이 바뀌는지를 계산한다(영국 선거 중계의 스윙 미터).
+  // 풍향계: 전국 결과(제1당)를 가장 꾸준히 맞힌 지역구·주.
+
+  _twoParty(rec){
+    const cur=(rec.results||[]).slice().sort((a,b)=>(b.votes||0)-(a.votes||0));
+    return cur.length>=2? [cur[0], cur[1]] : null;
+  }
+
+  swingAnalysis(rec){
+    if(!rec) return null;
+    const idx=this.elections.indexOf(rec);
+    const prev= idx>0? this.elections[idx-1] : null;
+    const AB=this._twoParty(rec); if(!AB) return null;
+    const [A,B]=AB;
+    const out={A:{id:A.id,name:A.name,color:A.color,votes:A.votes,seats:A.seats},
+               B:{id:B.id,name:B.name,color:B.color,votes:B.votes,seats:B.seats},
+               T:rec.total||this.totalSeats||300, prevY:prev? prev.y : null};
+    out.need=Math.floor(out.T*(this.con.majority||0.5))+1;
+    if(prev){
+      const pv=id=>{ const r=prev.results.find(x=>x.id===id); return r? (r.votes||0) : null; };
+      const a0=pv(A.id), b0=pv(B.id);
+      if(a0!=null && b0!=null) out.swing=((A.votes-a0)-(B.votes-b0))/2;
+    }
+    // 균일 스윙 의석 곡선 — 지역구 제도에서만 의미가 있다
+    const DS=rec.dShare;
+    // 연동형(보정형)은 지역구를 더 이겨도 비례에서 깎여 총 의석이 득표에 비례한다 — 균일 스윙 의석 곡선이 무의미하다
+    const sysR=this.con.system? this.readSystem() : null;
+    const compensatory = rec.method==='MMP' || (sysR && sysR.tier && sysR.tier.mode==='mixed' && sysR.tier.mixLink!=='parallel');
+    out.compensatory=compensatory;
+    if(DS && DS.length && !compensatory){
+      const pSeat=id=>{ const r=rec.results.find(x=>x.id===id); return r? (r.pSeats||0) : 0; };
+      let seatsAt=s=>{ let a=0,b=0;
+        for(const [,rows] of DS){
+          let best=null, bv=-1;
+          for(const [id,pc] of rows){ const v= id===A.id? pc+s : id===B.id? pc-s : pc; if(v>bv){ bv=v; best=id; } }
+          if(best===A.id) a++; else if(best===B.id) b++;
+        }
+        const k=out.T/Math.max(1,DS.length+rec.results.reduce((x,r)=>x+(r.pSeats||0),0))||1;
+        return {a:a+pSeat(A.id), b:b+pSeat(B.id)}; };
+      // 보정 — 곡선이 실제 의석을 지나가게 한다(득표율 반올림·빠진 지역구 차이를 상쇄). 중계 방송의 관행과 같다
+      const raw0=seatsAt(0), offA=(A.seats||0)-raw0.a, offB=(B.seats||0)-raw0.b;
+      const seatsAt0=seatsAt;
+      seatsAt=v=>{ const r=seatsAt0(v); return {a:r.a+offA, b:r.b+offB}; };
+      const curve=[]; for(let s=-15; s<=15.001; s+=0.5) curve.push([s, seatsAt(s)]);
+      out.curve=curve;
+      const at0=seatsAt(0);
+      // A가 과반이면 몇 %p를 잃어야 무너지나 / 아니면 몇 %p를 얻어야 닿나
+      const find=(test, dir)=>{ for(let s=0; Math.abs(s)<=15.001; s+=dir*0.1){ if(test(seatsAt(s))) return Math.round(s*10)/10; } return null; };
+      out.majA = at0.a>=out.need? find(x=>x.a<out.need, -1) : find(x=>x.a>=out.need, +1);
+      out.majB = at0.b>=out.need? find(x=>x.b<out.need, +1) : find(x=>x.b>=out.need, -1);
+      out.flip = at0.a>=at0.b? find(x=>x.b>x.a, -1) : find(x=>x.a>x.b, +1);
+      // 지역구별 스윙 — 가장 크게 움직인 곳
+      if(prev && prev.dShare && prev.dShare.length===DS.length){
+        const P=new Map(prev.dShare.map(([d,rows])=>[d,new Map(rows)]));
+        const loc=[];
+        for(const [d,rows] of DS){ const m=new Map(rows), p=P.get(d); if(!p) continue;
+          const a1=m.get(A.id)||0, b1=m.get(B.id)||0, a0=p.get(A.id), b0=p.get(B.id);
+          if(a0==null || b0==null) continue;
+          loc.push([d, ((a1-a0)-(b1-b0))/2]); }
+        loc.sort((x,y)=>y[1]-x[1]);
+        out.local={toA:loc.slice(0,3), toB:loc.slice(-3).reverse(), n:loc.length};
+      }
+    }
+    return out;
+  }
+
+  // 풍향계 지역구 — 제1당을 가장 꾸준히 맞힌 곳 (선거구 획정이 같은 선거들 안에서)
+  bellwethers(){
+    const E=(this.elections||[]).filter(e=>e.dWin && e.dWin.length);
+    if(E.length<4) return [];
+    const n0=E[E.length-1].dWin.length;
+    const EE=E.filter(e=>e.dWin.length===n0);
+    if(EE.length<4) return [];
+    const cnt=new Map();
+    for(const e of EE){
+      const nat=e.results.slice().sort((a,b)=>(b.seats||0)-(a.seats||0))[0]; if(!nat) continue;
+      for(const [d,w,reg] of e.dWin){ const c=cnt.get(d)||{hit:0,n:0,reg}; c.n++; if(w===nat.id) c.hit++; cnt.set(d,c); }
+    }
+    return [...cnt.entries()].map(([d,c])=>({d, reg:c.reg, hit:c.hit, n:c.n, rate:c.hit/c.n}))
+      .filter(x=>x.n>=4 && x.rate>=0.8).sort((a,b)=>b.rate-a.rate || b.n-a.n).slice(0,5);
+  }
+  // 풍향계 주 — 선거인단 당선자를 맞힌 주
+  bellwetherStates(){
+    const L=(this.presLog||[]).filter(r=>r.ec && r.ec.states && r.ec.states.length);
+    if(L.length<3) return [];
+    const n0=L[0].ec.states.length;
+    const cnt=new Map();
+    for(const r of L){ if(r.ec.states.length!==n0) continue;
+      for(const st of r.ec.states){ const c=cnt.get(st.reg)||{hit:0,n:0}; c.n++; if(st.win===r.ec.winner) c.hit++; cnt.set(st.reg,c); } }
+    return [...cnt.entries()].map(([reg,c])=>({reg, hit:c.hit, n:c.n, rate:c.hit/c.n}))
+      .filter(x=>x.n>=3 && x.rate>=0.8).sort((a,b)=>b.rate-a.rate || b.n-a.n).slice(0,3);
+  }
+
+  // ════════ 선거의 밤 ② — 개표 순서 · 실시간 예측 ════════
+  //
+  // 개표 순서: 농촌·작은 지역구가 먼저 끝나고 도시가 늦다. 그래서 초반엔 농촌 강세 정당이 앞서다
+  //   도시 표가 들어오며 뒤집히는 '신기루'가 자연스럽게 생긴다.
+  // 예측: 결과를 미리 아는 게 아니라, 개표된 지역구만 보고 남은 곳을 추정한다.
+  //   지난 선거 대비 정당별 변화(스윙)를 개표된 곳에서 재고, 남은 지역구의 지난 득표에 더해
+  //   불확실성(개표가 진행될수록 줄어든다)을 얹어 몬테카를로로 돌린다.
+
+  countOrder(rec){
+    const DW=rec.dWin||[];
+    return DW.map(([d,,reg])=>{ const u=((REGION_TRAITS[reg]||{}).urban??0.5);
+      return [d, u + gauss(0,0.18)]; }).sort((a,b)=>a[1]-b[1]).map(x=>x[0]);
+  }
+
+  countProjection(rec, counted, sims){
+    sims=sims||160;
+    const DS=rec.dShare||[]; if(!DS.length) return null;
+    const idx=this.elections.indexOf(rec), prev=idx>0? this.elections[idx-1] : null;
+    const cur=new Map(DS.map(([d,rows])=>[d,new Map(rows)]));
+    const P=(prev && prev.dShare && prev.dShare.length===DS.length)? new Map(prev.dShare.map(([d,rows])=>[d,new Map(rows)])) : null;
+    const W=new Map((rec.dWin||[]).map(([d,w])=>[d,w]));
+    // 개표된 곳에서 잰 정당별 변화량
+    const ids=new Set(); for(const d of counted) for(const id of cur.get(d).keys()) ids.add(id);
+    const delta=new Map(), avg=new Map();
+    for(const id of ids){
+      let sd=0, nd=0, sa=0, na=0;
+      for(const d of counted){ const c=cur.get(d).get(id)||0; sa+=c; na++;
+        if(P && P.has(d)){ const p=P.get(d).get(id); if(p!=null){ sd+=c-p; nd++; } } }
+      delta.set(id, nd? sd/nd : 0); avg.set(id, na? sa/na : 0);
+    }
+    const f=counted.length/Math.max(1,DS.length);
+    const sigma=2.5+7*(1-f);
+    const cSet=new Set(counted), rest=DS.map(x=>x[0]).filter(d=>!cSet.has(d));
+    const base=new Map();
+    for(const d of counted){ const w=W.get(d); base.set(w,(base.get(w)||0)+1); }
+    // 비례 몫 — 개표된 곳의 평균 득표로 추정
+    const pTotal=rec.results.reduce((a,r)=>a+(r.pSeats||0),0);
+    const pEst=new Map();
+    if(pTotal>0){ let tot=0; avg.forEach(v=>tot+=v); if(tot>0) avg.forEach((v,id)=>pEst.set(id, pTotal*v/tot)); }
+    const T=rec.total||this.totalSeats||300, need=Math.floor(T*(this.con.majority||0.5))+1;
+    const first=new Map(), maj=new Map(), meanSeats=new Map();
+    const cand=[...ids];
+    for(let k=0;k<sims;k++){
+      const seats=new Map(base);
+      // 전국 공통 오차 — 여론 전체가 한쪽으로 기우는 불확실성
+      const nat=new Map(cand.map(id=>[id, gauss(0, sigma*0.5)]));
+      for(const d of rest){
+        let best=null, bv=-1e9;
+        const pd=P? P.get(d) : null;
+        for(const id of cand){
+          const b0 = pd && pd.get(id)!=null? pd.get(id)+delta.get(id) : avg.get(id);
+          const v=b0 + nat.get(id) + gauss(0, sigma*0.7);
+          if(v>bv){ bv=v; best=id; }
+        }
+        seats.set(best,(seats.get(best)||0)+1);
+      }
+      pEst.forEach((v,id)=>seats.set(id,(seats.get(id)||0)+v));
+      let top=null, tv=-1; seats.forEach((v,id)=>{ meanSeats.set(id,(meanSeats.get(id)||0)+v/sims); if(v>tv){ tv=v; top=id; } });
+      first.set(top,(first.get(top)||0)+1/sims);
+      seats.forEach((v,id)=>{ if(v>=need) maj.set(id,(maj.get(id)||0)+1/sims); });
+    }
+    return { f, need, T, first, maj, meanSeats, sigma };
+  }
   // ════════ 뒤베르제 법칙 ════════
   //
   // 실측에서 소선거구 300석인데 정당이 30개였다. 의석은 수렴했으나
@@ -15581,6 +15757,7 @@ class Sim {
       const rec={
         // 지역구 승자 — 다음 총선에서 '어디서 어디로 넘어갔나'를 계산한다
         dWin:(this.districtResults||[]).map(x=>[x.d, x.win, x.reg]),
+        dShare:(this.districtResults||[]).map(x=>[x.d, (x.all||[]).slice(0,4).map(a=>[a.id, Math.round(a.pct*10)/10])]),
         y:this.year(), sys:C.method, method:C.method, turnout:turnoutPct, gallagher, enpS, enpV:enpS,
         pollRun:(this._pollRun||[]).slice(),
         // 제도 요약 + 의석 경로 — 어떤 경로로 의석을 얻었는가
@@ -15686,7 +15863,7 @@ class Sim {
       this._presRec=null;
       this.elections.push(rec); if(this.elections.length>60)this.elections.shift();
       // 저장 크기 관리 — 지역구 승자 목록은 최근 12회분만 남긴다
-      for(let k=0;k<this.elections.length-12;k++) if(this.elections[k].dWin) delete this.elections[k].dWin;
+      for(let k=0;k<this.elections.length-12;k++){ if(this.elections[k].dWin) delete this.elections[k].dWin; if(this.elections[k].dShare) delete this.elections[k].dShare; }
 
       this.pageRec=rec;   // UI가 상세 페이지를 열고 일시정지
       // 출구조사 — 개표 전 예측
@@ -18604,7 +18781,7 @@ const $=s=>document.querySelector(s);
 const PEDIT_AXIS=['전통/혁신','안심/불안','자율/질서','공존/결속','만족/박탈','불신/신뢰'];
 const UI={
   speed:1, paused:false, sim:null, mapRegions:[], _newsDirty:false,
-  popLower:true, popSen:false, popPres:true,
+  popLower:true, popSen:false, popPres:true, countOn:true,
 
   init(){
     this.sim=new Sim();
@@ -18960,7 +19137,8 @@ const UI={
       this.render();
       const rec=this.sim.pageRec;
       if(rec){ this.sim.pageRec=null;
-        if(this.popLower) this.openElection(rec);
+        // 개표 중계 — 켜져 있고, 지역구가 있고, '최대' 속도가 아니면 결과 팝업 앞에 띄운다
+        if(this.popLower){ if(this.countOn && this.speed<40 && rec.dShare && rec.dShare.length && this.openCount) this.openCount(rec); else this.openElection(rec); }
       }
       const srec=this.sim.senatePageRec;
       if(srec){ this.sim.senatePageRec=null;
@@ -19149,7 +19327,7 @@ const UI={
       document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+t.dataset.p));
       this.render(true);
     });
-    ['popLower','popSen','popPres'].forEach(id=>{
+    ['popLower','popSen','popPres','countOn'].forEach(id=>{
       const el=$('#'+id); if(!el) return;
       el.checked=this[id]; el.onchange=()=>{ this[id]=el.checked; };
     });
@@ -19191,7 +19369,7 @@ const UI={
   // 정지를 관리하다 보니 새 팝업이 생길 때마다 누락됐다.
   // 여기서 '열려 있는 팝업이 하나라도 있으면 정지'로 통합한다.
   anyPopupOpen(){
-    const ids=['elPage','senPage','constPage','docuPage','splitPage','peditPage'];
+    const ids=['elPage','senPage','constPage','docuPage','splitPage','peditPage','countPage'];
     for(const id of ids){
       const e=document.getElementById(id);
       if(e && e.classList.contains('show')) return id;
@@ -22828,7 +23006,7 @@ Object.assign(UI, {
       // 색은 정당의 '현재' 값을 쓴다. hist에 박아둔 값을 쓰면
       // 플레이어가 색을 바꿔도 그래프가 따라오지 않는다.
       const cur = alive? s.parties.find(q=>q.id===+id) : null;
-      return {data:o.data, color:(cur&&cur.color)||o.color, label: alive? (cur?cur.name:o.name) : ''};
+      return {data:o.data, color:(cur&&cur.color)||o.color, label: alive? (cur?cur.name:o.name) : '', tipName:o.name};
     });
     drawMulti($('#chSupport'),series,0,Math.max(30,...series.flatMap(x=>x.data.filter(v=>v!=null)))||50);
   },
@@ -23584,7 +23762,7 @@ Object.assign(UI, {
       ${box}
       <h1>${rec.y}년 ${s.country} 총선${elName?` — ${elName}`:''}</h1>
       <div class="wkLead">${METHODNAME[rec.method]||rec.method} · ${num(T)}석 · 투표율 ${pct(rec.turnout)}</div>
-      ${lead}${sysSec}${bgSec}${pollSec}${exitSec}${table}${pathSec}${srcSec}${analysis}${splitSec}${regSec}${(()=>{ const f=this._seatFlowHTML(rec,true); const st=this._elecStackHTML(rec).replace(/class="prSec"/g,'class="wkNote" style="font-weight:600;margin-top:10px"'); return (f||st)? '<h2>의석 이동</h2>'+f+st : ''; })()}${dist}${senSec}${envSec}${socSec}${govSec}${peopleSec}${cfSec}${aftSec}${legacySec}${trivSec}
+      ${lead}${sysSec}${bgSec}${pollSec}${exitSec}${table}${pathSec}${srcSec}${analysis}${splitSec}${regSec}${(()=>{ const sw=this._swingHTML(rec,true), bw=this._bellHTML(rec,true); return (sw||bw)? '<h2>스윙과 풍향계</h2>'+sw+(bw? '<h3>풍향계 지역구</h3>'+bw : '') : ''; })()}${(()=>{ const f=this._seatFlowHTML(rec,true); const st=this._elecStackHTML(rec).replace(/class="prSec"/g,'class="wkNote" style="font-weight:600;margin-top:10px"'); return (f||st)? '<h2>의석 이동</h2>'+f+st : ''; })()}${dist}${senSec}${envSec}${socSec}${govSec}${peopleSec}${cfSec}${aftSec}${legacySec}${trivSec}
       <div class="wkRef">이 문서는 시뮬레이션 결과로 자동 생성되었다. 수치는 개표 기록에서 직접 산출한 값이다.</div>
     </div>`;
     if(toHTML) return HTML;
@@ -24464,6 +24642,9 @@ Object.assign(UI, {
           + '</tbody></table>';
       }
     }
+    // 풍향계 주 — 선거인단 당선자를 꾸준히 맞힌 곳
+    { const BS=s.bellwetherStates? s.bellwetherStates() : [];
+      if(BS.length) h+=`<div class="mut10" style="margin:6px 0">풍향계 주: `+BS.map(b=>`<b>${rn(b.reg)}</b> ${b.hit}/${b.n}`).join(' · ')+` — 이 주를 이긴 후보가 대통령이 됐다.</div>`; }
     // 역대 선거인단
     const hist=log.filter(r=>r.y<=y).slice(0,10);
     if(hist.length>1){
@@ -24539,6 +24720,159 @@ Object.assign(UI, {
     const w=root.querySelector(':scope > .prWin');
     if(w){ w.classList.add('top'); root.prepend(w); }
     this._foldSections(root, (t,i)=> i===0 || /^정권과 의회/.test(t) || /^선거인단 —/.test(t));
+  },
+
+  // ── 스윙 미터 — 반원 게이지. 오른쪽이 제1당(A), 왼쪽이 제2당(B) 쪽 스윙 ──
+  _swingHTML(rec, asDoc){
+    const s=this.sim; const W=s.swingAnalysis? s.swingAnalysis(rec) : null; if(!W) return '';
+    const A=W.A, B=W.B, R=96, cx=130, cy=112, M=12;
+    const ang=v=>Math.PI*(1-(Math.max(-M,Math.min(M,v))+M)/(2*M));
+    const pt=(v,r)=>[cx+r*Math.cos(ang(v)), cy-r*Math.sin(ang(v))];
+    const arc=(v0,v1,col)=>{ const [x0,y0]=pt(v0,R), [x1,y1]=pt(v1,R);
+      return `<path d="M${x0.toFixed(1)} ${y0.toFixed(1)} A${R} ${R} 0 0 1 ${x1.toFixed(1)} ${y1.toFixed(1)}" stroke="${col}" stroke-width="14" fill="none" opacity="0.85"/>`; };
+    const tick=(v,lab,col)=>{ if(v==null||Math.abs(v)>M) return ''; const [x0,y0]=pt(v,R-12), [x1,y1]=pt(v,R+12), [xl,yl]=pt(v,R+24);
+      return `<line x1="${x0.toFixed(1)}" y1="${y0.toFixed(1)}" x2="${x1.toFixed(1)}" y2="${y1.toFixed(1)}" stroke="${col}" stroke-width="2"/>
+        <text x="${xl.toFixed(1)}" y="${yl.toFixed(1)}" fill="${col}" font-size="9" text-anchor="middle">${lab}</text>`; };
+    const sw=W.swing;
+    const [nx,ny]=pt(sw??0, R-4);
+    let svg=`<svg viewBox="0 0 260 128" style="width:100%;max-width:300px;display:block;margin:4px auto">
+      ${arc(-M,0,B.color)}${arc(0,M,A.color)}
+      ${[-10,-5,0,5,10].map(v=>{ const [x,y]=pt(v,R-20); return `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" fill="rgba(200,215,240,0.55)" font-size="8.5" text-anchor="middle">${v>0?'+':''}${v}</text>`; }).join('')}
+      ${tick(W.flip,'제1당 교체','#f2b35b')}
+      ${tick(W.majA,'A 과반선','#ffffff')}
+      ${sw!=null? `<line x1="${cx}" y1="${cy}" x2="${nx.toFixed(1)}" y2="${ny.toFixed(1)}" stroke="#fff" stroke-width="3" stroke-linecap="round"/>` : ''}
+      <circle cx="${cx}" cy="${cy}" r="6" fill="#fff"/>
+      <text x="14" y="124" fill="${B.color}" font-size="10" font-weight="700">◀ ${B.name}</text>
+      <text x="246" y="124" fill="${A.color}" font-size="10" font-weight="700" text-anchor="end">${A.name} ▶</text>
+    </svg>`;
+    const fmt=v=>(v>0?'+':'')+v.toFixed(1)+'%p';
+    const nm=d=>s.districtName? s.districtName(d) : '제'+d+'구';
+    let h = asDoc? '' : `<div class="prSec" style="margin-top:10px">스윙 미터 — ${A.name} 대 ${B.name}${W.prevY!=null?` · ${W.prevY}년 대비`:''}</div>`;
+    h+=svg;
+    const lines=[];
+    if(sw!=null) lines.push(`<b style="color:${sw>=0?A.color:B.color}">${sw>=0?A.name:B.name} 쪽으로 ${Math.abs(sw).toFixed(1)}%p 스윙</b> — 두 거대 정당 사이에서 옮겨간 표(버틀러 스윙).`);
+    if(W.curve){
+      if(W.flip!=null) lines.push(`균일 스윙으로 <b>${fmt(W.flip)}</b>면 제1당이 바뀐다.`);
+      if(W.majA!=null) lines.push(A.seats>=W.need? `${A.name}은 <b>${fmt(W.majA)}</b> 스윙이면 과반(${W.need}석)을 잃는다.` : `${A.name}이 과반(${W.need}석)에 닿으려면 <b>${fmt(W.majA)}</b> 스윙이 필요하다.`);
+      if(W.flip==null && W.majA==null) lines.push('±15%p 안의 균일 스윙으로는 제1당도 과반도 바뀌지 않는다 — 안전한 결과다.');
+      if(W.local && W.local.n){
+        lines.push(`가장 크게 움직인 곳: ${W.local.toA.filter(x=>x[1]>0).map(([d,v])=>`${nm(d)} <span style="color:${A.color}">${fmt(v)}</span>`).join(' · ')||'—'}`
+          + ` / ${W.local.toB.filter(x=>x[1]<0).map(([d,v])=>`${nm(d)} <span style="color:${B.color}">${fmt(v)}</span>`).join(' · ')||'—'}`);
+      }
+    } else lines.push(W.compensatory? '연동형이라 지역구를 더 이겨도 비례에서 보정된다 — 총 의석은 정당 득표에 비례해 움직인다.' : '비례 의석이 대부분이라 의석은 득표에 거의 비례해 움직인다 — 스윙이 곧 의석 이동이다.');
+    h+=`<div class="mut10" style="line-height:1.7">${lines.join('<br>')}</div>`;
+    return h;
+  },
+  // ── 풍향계 지역구 ──
+  _bellHTML(rec, asDoc){
+    const s=this.sim; const B=s.bellwethers? s.bellwethers() : []; if(!B.length) return '';
+    const nm=d=>s.districtName? s.districtName(d) : '제'+d+'구';
+    const rn=r=>(typeof REGION_NAMES!=='undefined' && REGION_NAMES[r])? REGION_NAMES[r] : '';
+    const nat=rec.results.slice().sort((a,b)=>(b.seats||0)-(a.seats||0))[0];
+    const won=new Map((rec.dWin||[]).map(([d,w])=>[d,w]));
+    let h = asDoc? '' : `<div class="prSec" style="margin-top:10px">풍향계 지역구 — 제1당을 꾸준히 맞힌 곳</div>`;
+    h+=`<table class="wkT" style="font-size:10.5px"><thead><tr><th style="text-align:left">지역구</th><th>적중</th><th style="text-align:left">이번</th></tr></thead><tbody>`
+      + B.map(b=>{ const w=won.get(b.d); const p=s.parties.find(q=>q.id===w);
+          return `<tr><td>${nm(b.d)} <span class="mut">${rn(b.reg)}</span></td><td class="num"><b>${b.hit}/${b.n}</b></td>
+            <td>${p? this.pdot(p.id)+p.name : '—'}${w===(nat&&nat.id)? ' <span style="color:var(--ok,#5fe3b2)">✓</span>' : ' <span style="color:var(--bad,#ff7a86)">빗나감</span>'}</td></tr>`; }).join('')
+      + '</tbody></table>';
+    return h;
+  },
+
+  // ════════ 개표 중계 — 결과 팝업 앞에 띄운다 ════════
+  // 지역구가 농촌부터 하나씩 개표되고, 예측 바늘은 '개표된 곳만 보고' 남은 곳을 추정한다.
+  // 건너뛰기를 누르거나 개표가 끝나면 기존 결과 팝업으로 넘어간다.
+  openCount(rec){
+    const s=this.sim;
+    let pg=$('#countPage');
+    if(!pg){ pg=document.createElement('div'); pg.id='countPage';
+      pg.innerHTML=`<div id="countCard">
+        <h2 id="cntTitle"></h2><div class="mut10" id="cntSub"></div>
+        <div style="display:flex;justify-content:space-between;font-size:11px;margin-top:10px"><span>개표율</span><b id="cntPct">0%</b></div>
+        <div id="cntProgBar"><div style="width:0%"></div></div>
+        <div id="cntSeatBar"></div><div id="cntLegend" class="mut10" style="line-height:1.7"></div>
+        <div id="cntNeedle"></div>
+        <div id="cntFeed"></div>
+        <div id="cntBtns"><button class="btn primary" id="cntSkip">건너뛰기 ▶▶</button><button class="btn" id="cntFast">빠르게 ×3</button></div>
+      </div>`;
+      document.body.appendChild(pg); }
+    pg.classList.add('show');
+    const order=s.countOrder(rec), n=order.length;
+    const W=new Map(rec.dWin.map(([d,w])=>[d,w]));
+    const SH=new Map(rec.dShare.map(([d,rows])=>[d,new Map(rows)]));
+    const T=rec.total||s.totalSeats||300, need=Math.floor(T*(s.con.majority||0.5))+1;
+    const pSeats=new Map(rec.results.map(r=>[r.id, r.pSeats||0])); const pTot=[...pSeats.values()].reduce((a,b)=>a+b,0);
+    const byLR=rec.results.slice().sort((a,b)=>(a.lr??0)-(b.lr??0));
+    const info=id=>{ const r=rec.results.find(x=>x.id===id); const p=s.parties.find(q=>q.id===id);
+      return {name:(r&&r.name)||(p&&p.name)||(id===-2?'무소속':'?'), color:(p&&p.color)||(r&&r.color)||'#888'}; };
+    const nmD=d=>s.districtName? s.districtName(d) : '제'+d+'구';
+    $('#cntTitle').textContent=`${rec.y}년 총선 개표 중계`;
+    $('#cntSub').textContent=`${METHODNAME[rec.method]||rec.method} · 지역구 ${n}곳${pTot? ` + 비례 ${pTot}석` : ''} · 과반 ${need}석`;
+    const counted=[], seatC=new Map(), feed=[]; this._cntFlipAt=null;
+    let k=0, fast=1, done=false, lead=null, tick=0, proj=null, calledFirst=false;
+    const timer=setInterval(()=>step(), 110);
+    const finish=()=>{ if(done) return; done=true; clearInterval(timer); pg.classList.remove('show'); this.openElection(rec); };
+    $('#cntSkip').onclick=finish;
+    $('#cntFast').onclick=()=>{ fast= fast===1? 3 : 1; $('#cntFast').textContent= fast===1? '빠르게 ×3' : '보통 속도'; };
+    const needleSVG=(pr, A, B, wig)=>{
+      const R=74, cx=100, cy=86, v=Math.max(0,Math.min(1,pr+wig));
+      const a=Math.PI*(1-v), nx=cx+(R-6)*Math.cos(a), ny=cy-(R-6)*Math.sin(a);
+      const arc=(v0,v1,col)=>{ const a0=Math.PI*(1-v0), a1=Math.PI*(1-v1);
+        return `<path d="M${(cx+R*Math.cos(a0)).toFixed(1)} ${(cy-R*Math.sin(a0)).toFixed(1)} A${R} ${R} 0 0 1 ${(cx+R*Math.cos(a1)).toFixed(1)} ${(cy-R*Math.sin(a1)).toFixed(1)}" stroke="${col}" stroke-width="12" fill="none" opacity="0.85"/>`; };
+      return `<svg viewBox="0 0 200 100" style="width:220px;display:block;margin:6px auto 0 auto">
+        ${arc(0,0.5,B.color)}${arc(0.5,1,A.color)}
+        ${[0.25,0.5,0.75].map(t=>{ const aa=Math.PI*(1-t); return `<line x1="${(cx+(R-8)*Math.cos(aa)).toFixed(1)}" y1="${(cy-(R-8)*Math.sin(aa)).toFixed(1)}" x2="${(cx+(R+8)*Math.cos(aa)).toFixed(1)}" y2="${(cy-(R+8)*Math.sin(aa)).toFixed(1)}" stroke="rgba(255,255,255,0.35)"/>`; }).join('')}
+        <line x1="${cx}" y1="${cy}" x2="${nx.toFixed(1)}" y2="${ny.toFixed(1)}" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+        <circle cx="${cx}" cy="${cy}" r="5" fill="#fff"/>
+      </svg>`; };
+    const render=()=>{
+      const f=k/Math.max(1,n);
+      $('#cntPct').textContent=(f*100).toFixed(0)+'%';
+      $('#cntProgBar').firstElementChild.style.width=(f*100)+'%';
+      const shown=new Map(seatC); if(k>=n) pSeats.forEach((v,id)=>{ if(v) shown.set(id,(shown.get(id)||0)+v); });
+      $('#cntSeatBar').innerHTML=byLR.filter(r=>shown.get(r.id)).map(r=>{ const c=shown.get(r.id), w=c/T*100, I=info(r.id);
+        return `<div style="width:${w}%;background:${I.color}" title="${I.name} ${c}석">${w>7? c : ''}</div>`; }).join('');
+      const top=[...shown.entries()].sort((a,b)=>b[1]-a[1]).slice(0,4);
+      $('#cntLegend').innerHTML=top.map(([id,c])=>`${this.pdot(id)}${info(id).name} <b>${c}</b>`).join(' &nbsp; ')
+        + (k<n && pTot? ` <span style="opacity:0.6">· 비례 ${pTot}석은 개표 끝에 반영</span>` : '');
+      // 바늘 — 0.4초마다 다시 추정, 사이사이엔 불확실성만큼 흔들린다
+      if(tick%4===0 && counted.length){ proj=s.countProjection(rec, counted, 120); }
+      if(proj){
+        const fr=[...proj.first.entries()].sort((a,b)=>b[1]-a[1]);
+        const A=fr[0], Bp=fr[1]||[null,0];
+        const IA=info(A[0]), IB=Bp[0]!=null? info(Bp[0]) : {name:'기타', color:'#556'};
+        const wig=(1-proj.f)*0.06*(Math.random()-0.5);
+        const majA=proj.maj.get(A[0])||0;
+        $('#cntNeedle').innerHTML=needleSVG(A[1], IA, IB, wig)
+          + `<div style="text-align:center;font-size:12px;line-height:1.6"><b style="color:${IA.color}">${IA.name}</b> 제1당 확률 <b>${(A[1]*100).toFixed(0)}%</b>`
+          + ` · 과반 확률 <b>${(majA*100).toFixed(0)}%</b><br><span class="mut10">예상 의석 ${Math.round(proj.meanSeats.get(A[0])||0)}석 · 개표된 ${counted.length}곳만 보고 추정 (오차 ±${proj.sigma.toFixed(1)}%p)</span></div>`;
+        if(!calledFirst && A[1]>=0.99 && k<n){ calledFirst=true;
+          feed.unshift(`<div class="row" style="color:var(--am,#f2b35b)"><b>▶ 예측 — ${IA.name} 제1당 확실</b> (개표 ${(proj.f*100).toFixed(0)}%)</div>`); }
+      }
+      $('#cntFeed').innerHTML=feed.slice(0,6).join('');
+    };
+    const step=()=>{
+      if(done) return;
+      tick++;
+      const m=Math.min(n, Math.ceil(k + Math.max(1, n/90)*fast));
+      for(; k<m; k++){
+        const d=order[k], w=W.get(d); counted.push(d);
+        seatC.set(w,(seatC.get(w)||0)+1);
+        const pc=(SH.get(d)||new Map()).get(w);
+        if(k%Math.max(1,Math.round(n/60))===0 || m===n) feed.unshift(`<div class="row">${nmD(d)} — ${this.pdot(w)}<b>${info(w).name}</b> 당선${pc!=null? ` <span class="mut">${pc.toFixed(1)}%</span>`:''}</div>`);
+        // 선두 교체 — 농촌 먼저 개표되며 생기는 '신기루'
+        const L=[...seatC.entries()].sort((a,b)=>b[1]-a[1])[0][0];
+        if(lead!=null && L!==lead && k>n*0.1 && k-(this._cntFlipAt??-1e9)>n*0.03){ this._cntFlipAt=k; feed.unshift(`<div class="row" style="color:#6fb6ff"><b>▶ 선두 교체</b> — ${info(L).name}${s._josa(info(L).name,'이','가')} ${info(lead).name}${s._josa(info(lead).name,'을','를')} 앞섰다</div>`); }
+        lead=L;
+      }
+      render();
+      if(k>=n){ clearInterval(timer);
+        const fin=rec.results.slice().sort((a,b)=>b.seats-a.seats)[0];
+        feed.unshift(`<div class="row" style="color:var(--cy,#54e0ff)"><b>개표 완료</b> — ${fin.name} ${fin.seats}석${fin.seats>=need?' · 과반':''}</div>`);
+        render(); $('#cntSkip').textContent='결과 보기 ▶';
+        setTimeout(finish, 1600); }
+    };
+    render();
   },
 
   openElection(rec){
@@ -24650,8 +24984,8 @@ Object.assign(UI, {
     }).join('');
     const govPs=rec.gov.map(id=>s.parties.find(p=>p.id===id)).filter(Boolean);
     { let fb=$('#elFlow'); if(!fb){ fb=document.createElement('div'); fb.id='elFlow'; $('#elGov').after(fb); }
-      fb.innerHTML=this._seatFlowHTML(rec) + this._elecStackHTML(rec);
-      this._foldSections(fb, ()=>false); }
+      fb.innerHTML=this._swingHTML(rec) + this._bellHTML(rec) + this._seatFlowHTML(rec) + this._elecStackHTML(rec);
+      this._foldSections(fb, t=>/^스윙 미터/.test(t)); }
     const presForm = s.govForm==='PRES';
     if(presForm){
       const PP=s.president? s.parties.find(p=>p.id===s.president.pid) : null;
@@ -24983,7 +25317,7 @@ Object.assign(UI, {
         + Object.entries(x.seats).sort((a,b)=>b[1]-a[1]).map(([id,n])=>`<span style="font-size:10px;padding:2px 8px;border-radius:9px;background:${col(+id)}22;border:1px solid ${col(+id)}66;color:var(--tx)">${nm(+id)} <b>${n}석</b></span>`).join('')
         + '</div>' : '';
     const html=`<div style="font-size:12px;line-height:1.9;color:var(--tx2)">
-      <b style="color:var(--tx)">${REGION_NAMES[x.reg]||''}</b> 소속 · ${x.mag>1? x.mag+'인 선거구' : '1인 선거구'} · <b>${kindName}</b><br>
+      <b style="color:var(--tx)">${REGION_NAMES[x.reg]||''}</b> 소속 · ${x.mag>1? x.mag+'인 선거구' : '1인 선거구'} · <b>${kindName}</b>${(()=>{ const bw=(s.bellwethers? s.bellwethers():[]).find(b=>b.d===x.d); return bw? ` · <span style="color:#f2b35b">풍향계 ${bw.hit}/${bw.n}</span>` : ''; })()}<br>
       <span class="mut">총 투표 ${s.fmtVotes? s.fmtVotes(x.total) : x.total}표 · 유효 정당 수 ${enpL.toFixed(2)} · 사표율 ${wastedPct.toFixed(1)}%</span>
       ${seatChips}
       ${x.notable? (()=>{ const N0=x.notable; const fp=N0.from!=null? s.parties.find(q=>q.id===N0.from) : null;
@@ -27084,8 +27418,14 @@ window.addEventListener('DOMContentLoaded',()=>{
     const i=Math.max(0, Math.min(L-1, Math.round((x-30)/Math.max(1,(w-36))*(L-1))));
     const y=(UI.sim? UI.sim.year() : 0) - (L-1-i)/12;
     const fmt=v=> v==null? '—' : Math.abs(v)>=100? v.toFixed(0) : Math.abs(v)>=10? v.toFixed(1) : v.toFixed(2);
-    tip.innerHTML=`<b>${y.toFixed(0)}년 무렵</b><br>`+S.map(s=>{ const k=i-(L-s.data.length); const v=k>=0? s.data[k] : null;
-      return `<i style="background:${s.color||'#9ab'}"></i>${s.name||s.label||''} <b>${fmt(v)}</b>`; }).join('<br>');
+    // 그 시점에 값이 있는 계열만, 큰 순으로, 최대 8개. 없던 정당까지 "—"로 늘어놓으면 화면을 덮는다
+    const rows=S.map(s=>{ const k=i-(L-s.data.length); const v=k>=0? s.data[k] : null; return {s, v}; })
+      .filter(r=>r.v!=null && Number.isFinite(r.v) && Math.abs(r.v)>0.005).sort((a,b)=>b.v-a.v);
+    if(!rows.length){ tip.style.display='none'; return; }
+    const shown=rows.slice(0,8), more=rows.length-shown.length;
+    tip.innerHTML=`<b>${y.toFixed(0)}년 무렵</b><br>`+shown.map(({s,v})=>
+      `<i style="background:${s.color||'#9ab'}"></i>${s.tipName||s.label||s.name||''} <b>${fmt(v)}</b>`).join('<br>')
+      + (more>0? `<br><span style="opacity:0.6">외 ${more}개</span>` : '');
     tip.style.display='block';
     const tx=Math.min(window.innerWidth-tip.offsetWidth-8, e.clientX+14), ty=Math.max(8, e.clientY-tip.offsetHeight-10);
     tip.style.left=tx+'px'; tip.style.top=ty+'px';
