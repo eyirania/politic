@@ -761,10 +761,10 @@ body.modeWatch #btnBranch{display:none}
               </div>
               <div class="chipBar" id="parlOverlayBar" style="margin-top:6px;margin-bottom:2px;gap:5px">
                 <span class="lbl">반원 표시:</span>
-                <button class="tchip off" id="ovMaj" data-ov="maj">과반선</button>
                 <button class="tchip on" id="ovLabel" data-ov="label">정당 라벨</button>
                 <button class="tchip on" id="ovGov" data-ov="gov">여야 구분</button>
-                <button class="tchip off" id="ovGroup" data-ov="group">연합·블록 묶음</button>
+                <button class="tchip on" id="ovGroup" data-ov="group">연합·블록</button>
+                <button class="tchip off" id="ovBlocOrder" data-ov="blocOrder">블록끼리 모으기</button>
                 <button class="tchip off" id="ovFac" data-ov="fac">계파색</button>
               </div>
               <div class="chipBar" id="parlViewBar" style="margin-top:8px;margin-bottom:4px">
@@ -1527,7 +1527,13 @@ const USA50 = [
   ['델라웨어',0.99,.83,1.03,'gov'],['사우스다코타',0.89,.57,.88,'farm'],['노스다코타',0.78,.60,.98,'mine'],['알래스카',0.73,.66,1.16,'mine'],
   ['버몬트',0.64,.35,.94,'farm'],['와이오밍',0.58,.65,.96,'mine'],
 ];
-const REAL_REGION_DATA = { usa: USA50 };
+// 독일 16개 주 — 인구(백만)·도시화·소득(상대)·주요 산업. 바이에른(15.6%)이 커야 기사련이 지역 37%로 전국 약 6%가 된다
+const GER16 = [
+  ['노르트라인베스트팔렌',18.1,.82,1.00,'tech'],['바이에른',13.4,.62,1.12,'tech'],['바덴뷔르템베르크',11.3,.65,1.10,'tech'],['니더작센',8.1,.55,.92,'farm'],
+  ['헤센',6.4,.70,1.12,'gov'],['라인란트팔츠',4.2,.55,.93,'farm'],['작센',4.1,.60,.80,'tech'],['베를린',3.8,1.0,.95,'gov'],
+  ['슐레스비히홀슈타인',3.0,.55,.88,'port'],['브란덴부르크',2.6,.45,.78,'farm'],['작센안할트',2.2,.50,.75,'mine'],['튀링겐',2.1,.50,.77,'tech'],
+  ['함부르크',1.9,1.0,1.25,'port'],['메클렌부르크포어포메른',1.6,.45,.74,'farm'],['자를란트',1.0,.65,.85,'mine'],['브레멘',0.7,.95,1.02,'port'] ];
+const REAL_REGION_DATA = { usa: USA50, germany: GER16 };
 // 이름만이 아니라 인구 비중·도시화·소득·산업까지 덮어쓴다. 시민을 만들기 전에 불러야 한다.
 function applyRealRegionData(key){
   const D=REAL_REGION_DATA[key]; if(!D || D.length!==NREG) return false;
@@ -1581,8 +1587,8 @@ const FAC_COLORS = ['#5eb3e4','#e07b8a','#8cc07a','#e0a95e','#a894d8','#6ec6b4',
 const SYSNAME = { PR:'비례대표제', FPTP:'소선거구제', MIXED:'혼합형 선거제' };
 const FORMNAME = { PARL:'의원내각제', PRES:'대통령제', SEMI:'이원집정부제', CONSTMON:'입헌군주제', MONARCH:'선출군주제', ABSMON:'전제군주제' };
 // 하원 선거 방식 6종
-const METHODNAME = { FPTP:'소선거구 단순다수', RUNOFF:'소선거구 결선투표(2회 투표)', PR:'정당명부 비례', MMP:'연동형 비례', PARALLEL:'병립형 혼합', SNTV:'중선거구 단기非이양', AV:'선호투표(호주식)', STV:'단기이양식(아일랜드식)', GRC:'집단선거구(싱가포르식)' };
-const METHOD_KEYS = ['FPTP','RUNOFF','AV','SNTV','STV','GRC','PARALLEL','MMP','PR'];
+const METHODNAME = { FPTP:'소선거구 단순다수', RUNOFF:'소선거구 결선투표(2회 투표)', PR:'정당명부 비례', MMP:'연동형 비례', SEMIMMP:'준연동형 비례', PARALLEL:'병립형 혼합', SNTV:'중선거구 단기非이양', AV:'선호투표(호주식)', STV:'단기이양식(아일랜드식)', GRC:'집단선거구(싱가포르식)' };
+const METHOD_KEYS = ['FPTP','RUNOFF','AV','SNTV','STV','GRC','PARALLEL','SEMIMMP','MMP','PR'];
 // 상원 선출
 const SENNAME = { NONE:'없음(단원제)', FEDERAL:'연방 주별 균등', POPULAR:'전국 직선 비례', APPOINTED:'간선·임명', ESTATE:'귀족원(신분)', VOCATIONAL:'직능 대표(아일랜드형)' };
 // ── 신분제 ──
@@ -3374,7 +3380,11 @@ class Sim {
     {fn:'_sysGovRep', every:12, save:['govRep','_repKey','_repLead']},
     {fn:'_challengerEntry', every:3, save:['_lastChallenger','_entryPressure','_lastNewAxisTick']},
     {fn:'stepSupport'},
-    {fn:'_reconcileSeatKinds'}, {fn:'stepDerived'}, {fn:'stepReferendum'},
+    {fn:'_reconcileSeatKinds'},
+    {fn:'_sysTurf'},
+    {fn:'_sysGovBlocs', every:12, save:['govBlocs']},
+    {fn:'_sysSatellites', every:1},
+    {fn:'_sysFactionOrg', every:12}, {fn:'stepDerived'}, {fn:'stepReferendum'},
     {fn:'_sysEnsureKing'},
     {fn:'stepPolls'}, {fn:'stepPartySaga'}, {fn:'stepCordon'}, {fn:'stepCordonCost'}, {fn:'stepPartyRename'},
     {fn:'stepCleavageFreeze'}, {fn:'stepIssueOwnership'}, {fn:'stepIssuePush'}, {fn:'stepLocalIssues'},
@@ -3775,7 +3785,7 @@ class Sim {
         const base=0.055*(this.factionTension??1)*(1.4-(p.discipline??0.5));
         const xm=this.exitMul? this.exitMul(p) : 1;
         // 분당은 새 당을 만드는 일이라 진입 관문을 거친다. 목소리(아래)는 거치지 않는다.
-        if(rebel && rnd()<base*xm && this.canCreateParty()){
+        if(rebel && rnd()<base*xm*(1+0.8*this._facOrgOf(p, rebel)) && this.canCreateParty()){   // 조직된 계파는 이탈 비용이 낮다
           this._factionSplit(p, rebel);
         } else if(this.bigTentOn!==false){
           // 목소리 — 나가는 대신 예비선거로 당을 접수한다 (허시먼).
@@ -4335,7 +4345,7 @@ class Sim {
           const lrOk=best.ids.every(id=>{ const x=this.parties.find(z=>z.id===id); return Math.abs(this.lr(x.cent)-this.lr(q.cent))<=MAXLR; });
           if(!lrOk) continue; const g2=this._allianceGain([...best.ids, q.id]); if(g2>best.g+1){ best={g:g2, ids:[...best.ids,q.id]}; } }
         this.formAlliance(best.ids);
-        const A=this.alliances[this.alliances.length-1]; if(A){ A.auto=true; A.expGain=best.g; }
+        const A=this.alliances[this.alliances.length-1]; if(A){ A.auto=true; A.expGain=best.g; if(best.survival) A.govPact=false; }   // 생존 협약은 선거만 함께
       }
     }
     // ── 붕괴: 결속 낮거나 내부 긴장 누적, 비례제로 바뀌어 압력 사라지면 ──
@@ -4403,7 +4413,7 @@ class Sim {
     const nm=(name&&name.trim())||(this.allianceName? this.allianceName(ps,'ally') : ps.map(p=>p.name.replace(/당|연합|회의$/,'')).slice(0,2).join('·')+' 연대');
     const a={id:this.nextAllyId++, name:nm.slice(0,18), color:color||ps[0].color, members:free,
       auto:false, cohesion:this._allyCohesion(free), born:this.year(), bornTick:this.tick, tension:0,
-      depth:1, jointElections:0, share:null, leader:null};
+      depth:1, jointElections:0, share:null, leader:null, govPact:true};   // govPact: 공동정부 약속(생존 협약은 false)
     this.alliances.push(a);
     this.pushNews(2,'pos',`<b>선거연합 결성</b> — ${nm} (${ps.map(p=>p.name).join(' + ')}) · 결속도 ${(a.cohesion*100|0)}%`);
     this.chron(`선거연합: ${nm}`);
@@ -4420,7 +4430,7 @@ class Sim {
   _promoteAlliance(a){
     const ms=a.members.map(id=>this.parties.find(p=>p.id===id)).filter(Boolean);
     if(ms.length<2) return;
-    a.depth=2; a.tension=clamp((a.tension||0)*0.6,0,1);
+    a.depth=2; a.govPact=true; a.tension=clamp((a.tension||0)*0.6,0,1);
     // 사전 합의 배분 비율: 지지율 기반 + 소수당 배려(협상력)
     const totS=ms.reduce((x,p)=>x+Math.max(p.support,0.001),0)||1;
     a.share={};
@@ -4756,6 +4766,79 @@ class Sim {
   // 정당이 사라질 때 의석이 증발하지 않게 한다.
   // 자연 소멸 경로에만 무소속 잔류가 있었고, 강제 해산·뒤베르제 소멸에서는
   // 의석이 그냥 사라져 하원이 296~299석이 되곤 했다.
+  // ════ 위성정당 ════
+  // 보정형 비례제(연동형·준연동형)에서 지역구를 많이 이기는 큰 정당은 비례 보정을 거의 못 받는다. 그래서 비례 전용
+  // 위성 명부를 따로 낸다 — 모정당 지지자의 비례 표가 위성으로 가고, 위성은 지역구 의석이 0이라 보정 몫을 다 받는다.
+  // 한쪽이 만들면 상대도 따라 만든다(한국 2020). 선거 1~4개월 뒤 모정당에 흡수 합당한다.
+  _sysSatellites(){
+    for(const s of this.parties.filter(p=>p.satelliteOf!=null)){
+      const m=this.parties.find(q=>q.id===s.satelliteOf), sinceE=this.tick-this.lastElection, age=this.tick-(s.bornTick??this.tick);
+      if(!m){ s.satelliteOf=null; s.satellite=false; continue; }
+      if(sinceE>=1 && sinceE<=4 && age>sinceE){
+        this._moveSeats(s, m, s.seats||0);
+        for(let i=0;i<N;i++){ if(this.party[i]===s.id) this.party[i]=m.id; if(this.pidParty && this.pidParty[i]===s.id) this.pidParty[i]=m.id; }
+        this.govCoalition=this.govCoalition.filter(id=>id!==s.id);
+        this.parties=this.parties.filter(q=>q!==s);
+        const lg=this.partyLog.find(l=>l.pid===s.id && !l.died); if(lg) lg.died=this.year();
+        this.pushNews(2,'norm',Sim._josa(`<b>위성정당 ${s.name}</b>, ${m.name}에 흡수 합당 — 비례 의석이 모정당으로`));
+      }
+    }
+    const SY=this.readSystem? this.readSystem() : null;
+    if(!SY || SY.tier.mode!=='mixed' || !(SY.tier.mixLink==='mmp'||SY.tier.mixLink==='partial') || !this.elections.length || this.partyLock) return;
+    const D=this.elecInterval-(this.tick-this.lastElection), DL=this.ballotDeadline??6;
+    if(D<DL+1 || D>DL+4) return;
+    const R=this.rs('satellite'), rate= SY.tier.mixLink==='mmp'? 1 : (SY.tier.partialRate??0.5);
+    const anySat=this.parties.some(p=>p.satelliteOf!=null), distT=Math.max(1,(this._sysLastRun&&this._sysLastRun.distSeats)||1);
+    for(const m of this.parties.filter(p=>p.id>=0 && !p.satellite && !p.listOnly)){
+      if(this.parties.some(s=>s.satelliteOf===m.id) || (m.support||0)<0.2) continue;
+      // 지역구 성적이 득표 몫에 이미 가까우면 보정을 거의 못 받는다 — 위성 명부의 이득이 크다
+      if((m.dSeats||0)/distT < (m.support||0)*0.95) continue;
+      if(R.rnd() > (anySat? 0.9 : 0.35+0.3*rate)) continue;
+      const name= /당$/.test(m.name)? m.name.replace(/당$/,'연합') : ((Sim._nameStem(m.name)||m.name)+'의미래');
+      const lighten=h=>{ let x=String(h||'#888').replace('#',''); if(x.length===3) x=x.split('').map(c=>c+c).join(''); return '#'+[0,2,4].map(i=>Math.round(parseInt(x.substr(i,2),16)+(255-parseInt(x.substr(i,2),16))*0.35).toString(16).padStart(2,'0')).join(''); };
+      const s={ id:this.nextPartyId++, name, slogan:m.slogan||'', color:lighten(m.color), cent:Float64Array.from(m.cent), rad:m.rad, support:0, seats:0, dSeats:0, pSeats:0,
+        founded:this.year(), lowStreak:0, home:-1, listOnly:true, satellite:true, satelliteOf:m.id, bornTick:this.tick };
+      this.parties.push(s); this.pushPartyLog({name:s.name,color:s.color,born:this.year(),died:null,pid:s.id});
+      this.pushNews(3,'sev2',Sim._josa(`<b>위성정당 ${s.name}</b> 창당 — ${m.name}(이) 비례 보정을 피하려 비례 전용 명부를 만들었다${anySat? ' (상대 당을 따라)' : ''}`));
+      this.chron(`위성정당: ${s.name}`);
+    }
+  }
+  // ════ 조직된 계파 ════
+  // 계파마다 조직도(0~1) — 회원·자금·지지 후보 네트워크. 오래 유지되고, 당 주류와 노선이 멀고, 불만이 클수록 해마다 강해진다.
+  // 프리셋은 실제 조직(DSA·모멘텀·아소파…)을 심는다 — 이념이 가장 가까운 계파에 자리 잡아 조직도를 끌어올린다.
+  // 효과: 경선 동원(당원 경선에서 가장 크게), 이탈 비용 하락(분당이 쉬워진다).
+  // 실제 조직은 계파 안 비중만큼 — 조직은 머릿수보다 동원력이 커서 비중의 제곱근(DSA 12%·쇄신파 31% → 0.75×0.62)
+  _facOrgOf(p, f){ if(!p||!f) return 0; const own=(p._facOrg&&p._facOrg[f.fid])||0; const nm=this._namedOrgFor(p,f);
+    const eff= nm? nm.str*(nm.size!=null? Math.sqrt(clamp(nm.size/Math.max(0.01,f.share||0.01))) : 1) : 0; return Math.max(own, eff); }
+  _namedOrgFor(p, f){ if(!p.orgs||!p.orgs.length||!p.factions) return null;
+    for(const o of p.orgs){ let best=null, bd=1e9; for(const g of p.factions){ let d=0; for(let k=0;k<6;k++) d+=((g.cent[k]||0)-o.cent[k])**2; d=Math.sqrt(d); if(d<bd){ bd=d; best=g; } }
+      if(best===f && bd<1.8) return o; }
+    return null; }
+  _sysFactionOrg(){
+    for(const p of this.parties){ if(p.id<0 || !p.factions) continue; const m=p._facOrg||(p._facOrg={}), keep={};
+      for(const f of p.factions){ const tgt=clamp(0.08 + 0.25*clamp((f.distC||0)/1.5) + 0.2*clamp((f.age||0)/20) + 0.3*(f.griev||0) - (f.dom? 0.1 : 0), 0, 0.85);
+        const prev=m[f.fid]??tgt*0.5; keep[f.fid]=prev+(tgt-prev)*0.15; }
+      p._facOrg=keep; }
+  }
+  // ════ 활동 지역 ════
+  // 활동 지역 인구 비중(1년 단위로 캐시)
+  _turfPopShare(p){ if(!p.turfR) return 1; const y=this.year(); if(p._tpY===y) return p._tp;
+    let n=0,t=0; for(let i=0;i<N;i++){ if(this.age[i]<(this.con.voteAge||18)) continue; n++; if(p.turfR.includes(this.region[i])) t++; }
+    p._tpY=y; p._tp=t/Math.max(1,n); return p._tp; }
+  _canChoose(p, reg){ if(p.turfR && !p.turfR.includes(reg)) return false; if(p.notInR && p.notInR.includes(reg)) return false; return true; }
+  // 안전망 — 다른 경로(전염·분당 안착·도전 정당 등)로 활동 지역 밖 정당을 지지하게 된 시민은 자매당이나 가장 가까운 당으로
+  _sysTurf(){
+    // 자매당이 사라지면 남은 쪽의 제외 지역을 푼다 — 그 지역 유권자에게 선택지가 남게
+    for(const p of this.parties){ if(p.sisterId==null) continue; const s=this.parties.find(q=>q.id===p.sisterId);
+      if(!s){ p.sisterId=null; if(p.notInR && p._notInFromSister) { p.notInR=null; p._notInFromSister=false; } } }
+    const T=this.parties.filter(p=>p.id>=0 && (p.turfR||p.notInR)); if(!T.length) return;
+    const ids=new Map(T.map(p=>[p.id,p]));
+    for(let i=0;i<N;i++){ const p=ids.get(this.party[i]); if(!p || this._canChoose(p, this.region[i])) continue;
+      const sis=p.sisterId!=null? this.parties.find(q=>q.id===p.sisterId) : null;
+      let to= (sis && this._canChoose(sis, this.region[i]))? sis : null;
+      if(!to){ let bd=1e9; for(const q of this.parties){ if(q.id<0 || q===p || !this._canChoose(q,this.region[i])) continue; const d=this.partyDist(p.cent,q); if(d<bd){ bd=d; to=q; } } }
+      if(to){ this.party[i]=to.id; if(this.pidParty && this.pidParty[i]===p.id) this.pidParty[i]=to.id; } }
+  }
   // ════ 의석 장부 ════
   // 의석을 옮길 때 지역구·비례 구분도 같이 옮긴다(보내는 당의 구성 비율대로). 예전엔 이탈·분당·합당·해산이
   // 의석 수(seats)만 옮겨, 정당 목록의 '지·비'와 의석 원천 패널이 서로 다른 숫자를 보였다.
@@ -4771,6 +4854,8 @@ class Sim {
   }
   // 안전망 — 모든 정당에서 지역구 + 비례 = 의석
   _reconcileSeatKinds(){
+    // 연정 목록 중복 정리 — 같은 정당이 두 경로(전선·영입)로 들어오는 것을 막는 안전망
+    const gc=this.govCoalition; if(gc && new Set(gc).size!==gc.length) this.govCoalition=[...new Set(gc)];
     for(const q of this.parties){ const s=q.seats||0; let d=q.dSeats||0, p=q.pSeats||0;
       if(d+p===s) continue;
       if(d+p<s) d+=s-(d+p); else { let over=d+p-s; const cutP=Math.min(p, Math.round(over*p/Math.max(1,d+p))); p-=cutP; over-=cutP; d=Math.max(0,d-over); }
@@ -9698,6 +9783,9 @@ class Sim {
       // 연동형 — 기존 엔진처럼 초과의석을 허용한다(지역구를 비례 몫보다 많이 이기면 그대로 둔다)
       case 'MMP':      return Object.assign(base,{adj:{overhang:'keep'}, tier:{mode:'mixed', mixLink:'mmp', districtShare:dr},
                                                   dist:{mag:(AX&&AX.distMode==='multi')?mag:1, rule:(AX&&AX.winRule==='runoff')?'runoff':'plurality', nomination:nom}});
+      // 준연동형(한국 2020·2024) — 득표 비례 몫과 지역구 의석의 차이를 연동률(기본 50%)만큼만 채운다. 초과의석 없음
+      case 'SEMIMMP':  return Object.assign(base,{tier:{mode:'mixed', mixLink:'partial', partialRate:(this.con.partialRate??0.5), districtShare:dr},
+                                                  dist:{mag:(AX&&AX.distMode==='multi')?mag:1, rule:(AX&&AX.winRule==='runoff')?'runoff':'plurality', nomination:nom}});
       default:         return Object.assign(base,{tier:{mode:'district'}, dist:{mag:1, rule:'plurality', nomination:nom}});
     }
   }
@@ -11700,6 +11788,10 @@ class Sim {
       };
     });
 
+    // 조직 동원 — 조직된 계파(DSA 등)는 지지자를 경선장에 데려온다. 당원 경선에서 가장 크고, 개방형 예비선거에선 작다
+    for(const r of runners){ const f=facs.find(x=>x.name===r.fac); r.org=this._facOrgOf? this._facOrgOf(party,f) : 0; }
+    // 투표율 낮은 당원 경선에서 조직이 승부를 가른다(2025 뉴욕시장 경선 맘다니) — 개방형은 그보다 작고, 지도부 지명은 더 작다
+    const orgK = mode==='member'? 1.4 : mode==='open'? 0.6 : 0.3;
     // 득표 계산 — 선출 주체가 누구냐에 따라 가중이 달라진다.
     // 지분에 지수를 두는 것이 핵심이다. 선형으로 두면 계파 지분이 고르게
     // 나뉘어 아무도 과반을 못 넘고 매번 결선으로 간다(실측 100%).
@@ -11715,6 +11807,7 @@ class Sim {
         // 개방형 예비선거 — 대중 인지도가 결정적
         v = Math.pow(r.share, 0.85)*0.62 + r.charisma*0.42 + rnd()*0.20;
       }
+      v *= 1 + orgK*(r.org||0);   // 조직 동원
       r.v=v;
     }
     const tot=runners.reduce((a,r)=>a+r.v,0)||1;
@@ -14333,7 +14426,15 @@ class Sim {
     return null;
   }
   // 이름 짓기의 입구 — 스타일을 뽑고, 그 스타일로 못 지으면 공통 생성기
+  // 다른 나라 프리셋의 실제 정당명 — 생성된 이름이 우연히 이와 같으면 다시 짓는다(오스트리아에 '새정치국민회의')
+  // 두 나라 이상에 있는 이름(사회민주당·녹색당)은 일반명이라 허용하고, 한 나라에만 있는 고유한 이름만 막는다
+  static get _foreignNames(){ if(!Sim._FN){ Sim._FN=new Map(); for(const [k,P] of Object.entries(Sim.PRESETS)) for(const sp of (P.seed||[])){ if(!Sim._FN.has(sp.name)) Sim._FN.set(sp.name,new Set()); Sim._FN.get(sp.name).add(k); } } return Sim._FN; }
   nameParty(cent, rad, opts){
+    for(let tryN=0; tryN<6; tryN++){ const r=this._nameParty1(cent, rad, opts); const homes=Sim._foreignNames.get(r.name);
+      if(!homes || homes.size>1 || homes.has(this._presetKey)) return r; }
+    return this._nameParty1(cent, rad, opts);
+  }
+  _nameParty1(cent, rad, opts){
     const o=opts||{}, style=this._pickStyle(), arche=this._archetypeOf(cent,rad)||'liberal';
     // 문화권 이름은 가볍게만 정리한다 — 무거운 정규화(_normPartyName)는 공백·가운뎃점을 지워
     // '공화국을 위한 개혁 운동'이 '공화국을위한개혁운동'이, '민주·녹색 연합'이 '민주녹색연합'이 됐다
@@ -14393,7 +14494,9 @@ class Sim {
     if((S.dist.rule||S.dist.formula)==='runoff' && S.tier.mode!=='proportional'){
       const rb=this.con.runoffBar; need = Math.max(bar, rb? rb/0.65 : 1/3); }
     if(p.listOnly) need=Math.max(bar, 0.02);       // 비례 전용 — 비례 표엔 사표 걱정이 봉쇄조항만큼만
-    const sup = p.support||0;
+    // 활동 지역이 있는 정당은 그 지역 안 득표로 당선 가능성을 본다 — 바이에른 유권자에게 기사련은 압도적 1당이다
+    // (전국 5~6%라 봉쇄조항 언저리로 판단하면 지지자가 떠나 기사련이 10년 만에 무너졌다)
+    const sup = p.turfR? Math.min(1, (p.support||0)/Math.max(0.03, this._turfPopShare(p))) : (p.support||0);
     if(sup >= need*1.35) return 0;                 // 충분히 넘으면 무압력
     // 문턱에 못 미칠수록 페널티. 정수가 작을수록 가파르다.
     const short = clamp((need*1.35 - sup)/(need*1.35), 0, 1);
@@ -14425,7 +14528,8 @@ class Sim {
       const sup=p.support||0, share=(p.seats||0)/T;
       // 실패 판정 — 의석이 없거나, 득표에 비해 의석이 턱없이 적다
       // 지역 기반 정당은 전국 지지가 낮아도 살아남는다(스코틀랜드 SNP형)
-      const regional = p.regAff && Math.max(...p.regAff)>0.45;
+      // 활동 지역이 정해진 정당(기사련·스코틀랜드국민당)은 지역 정당이다 — 전국 득표가 낮아도 지역에선 강하다
+      const regional = !!p.turfR || (p.regAff && Math.max(...p.regAff)>0.45);
       // 과밀할수록 살아남는 문턱이 올라간다
       // 결선제의 1차 투표는 진심 투표라, 의석이 없어도 1차 득표로 존재감·공적 보조금을 유지한다(콕스).
       // 그래서 의석 0인 정당의 소멸 문턱이 낮다 — 연합 상대로 남아 선거연합이 생길 수 있다.
@@ -14443,6 +14547,9 @@ class Sim {
       // 소멸 — 연속 실패가 쌓이면 해산한다.
       // 비례제에서는 군소정당이 살아남을 수 있으므로 문턱을 높인다.
       const limit = Math.max(3, Math.round((propish? 7 : 4) - crowd*3));
+      if(p.satellite) continue;   // 위성정당은 선거 뒤 모정당에 흡수된다
+      // 현직 대통령의 당은 자연 소멸하지 않는다 — 자원과 관심이 몰린다(강제 해산은 별도 경로)
+      if(this.president && this.president.pid===p.id){ p.lowStreak=Math.min(p.lowStreak, limit-1); continue; }
       if(p.lowStreak>=limit && this.parties.filter(q=>q.id>=0).length>2){
         this.dissolveParty(p, '지지 기반 상실');
         continue;
@@ -15206,8 +15313,10 @@ class Sim {
     };
     // 1) 전선 — 결속이 가장 강하다
     for(const f of (this.fronts||[])) add(f.members, 'front', f.name);
-    // 2) 선거연합
-    for(const a of (this.alliances||[])) add(a.members, 'ally', a.name);
+    // 2) 정부 블록 — 선거 협력 없이 '함께 정부를 하겠다'는 약속(덴마크 적·청 블록, 스웨덴 티되, 자민–유신)
+    for(const g of (this.govBlocs||[])) add(g.members, 'gov', g.name);
+    // 3) 선거연합 — 공동정부 약속이 있는 것만(생존 협약은 선거만 함께한다)
+    for(const a of (this.alliances||[])) if(a.govPact!==false) add(a.members, 'ally', a.name);
     // 3) 나머지는 단독 블록
     for(const p of this.parties){
       if(p.id<0 || (p.seats||0)<=0 || seen.has(p.id)) continue;
@@ -15271,17 +15380,25 @@ class Sim {
   blocOf(pid){
     for(const f of (this.fronts||[])) if(f.members.includes(pid))
       return f.members.map(id=>this.parties.find(p=>p.id===id)).filter(p=>p&&(p.seats||0)>0);
-    for(const a of (this.alliances||[])) if(a.members.includes(pid))
+    for(const a of (this.alliances||[])) if(a.govPact!==false && a.members.includes(pid))
       return a.members.map(id=>this.parties.find(p=>p.id===id)).filter(p=>p&&(p.seats||0)>0);
     const p=this.parties.find(x=>x.id===pid);
-    return p? [p] : [];
+    // 자매당은 한 몸 — 함께 집권하고 함께 야당이 된다(기민·기사련)
+    const sis= p && p.sisterId!=null? this.parties.find(x=>x.id===p.sisterId) : null;
+    const sats= p? this.parties.filter(x=>x.satelliteOf===p.id && (x.seats||0)>0) : [];   // 위성정당은 모정당과 한 몸
+    return p? [p, ...(sis && (sis.seats||0)>0? [sis] : []), ...sats] : [];
   }
 
   // 정부 구성이 끝난 뒤 블록 무결성을 강제한다.
   // 어떤 경로로 들어왔든, 연합·전선의 일부만 여당인 상태를 허용하지 않는다.
   enforceBlocIntegrity(){
     if(!this.govCoalition || !this.govCoalition.length) return;
-    const groups=[...(this.fronts||[]), ...(this.alliances||[])];
+    // 정부 블록은 출발점일 뿐 강제하지 않는다(덴마크 2022 블록을 넘은 연정). 연합은 공동정부 약속이 있는 것만
+    const groups=[...(this.fronts||[]), ...(this.alliances||[]).filter(a=>a.govPact!==false)];
+    // 자매당 — 한쪽이 여당이면 다른 쪽(의석이 있으면)도 여당이다. 다수결 없이 항상 끌어들인다(기민·기사련)
+    for(const id of this.govCoalition.slice()){ const p=this.parties.find(x=>x.id===id); if(!p || p.sisterId==null) continue;
+      const s=this.parties.find(x=>x.id===p.sisterId); if(s && (s.seats||0)>0 && !this.govCoalition.includes(s.id)) this.govCoalition.push(s.id); }
+    for(const id of this.govCoalition.slice()) for(const x of this.parties) if(x.satelliteOf===id && (x.seats||0)>0 && !this.govCoalition.includes(x.id)) this.govCoalition.push(x.id);
     let guard=0;
     let changed=true;
     while(changed && guard++<6){
@@ -15301,6 +15418,12 @@ class Sim {
       }
     }
   }
+
+  // 정부 블록 정리 — 사라진 정당을 빼고, 둘 미만이면 해체
+  _sysGovBlocs(){ if(!this.govBlocs||!this.govBlocs.length) return;
+    const alive=new Set(this.parties.map(p=>p.id));
+    for(const g of this.govBlocs) g.members=g.members.filter(id=>alive.has(id));
+    this.govBlocs=this.govBlocs.filter(g=>g.members.length>=2); }
 
   // ── 연합 통합 API ──
   // 선거연합(alliances)과 전선(fronts)은 구조가 같은데 배열이 따로였다.
@@ -15447,6 +15570,7 @@ class Sim {
     const DL=this.ballotDeadline??6;
     const elig=new Set(this.parties.filter(p=>p.id<0 || p.mergedFrom || (this.tick-(p.bornTick??this.tick))>=DL).map(p=>p.id));
     const redirect=new Map();
+    const SAT=new Map(); for(const p of this.parties) if(p.satelliteOf!=null) SAT.set(p.satelliteOf, p.id);
     // 비례 전용 정당의 지지자는 지역구에선 이념이 가장 가까운 큰 당을 찍는다(전국 표·비례 집계는 그대로 이 당)
     const LO=new Map();
     for(const p of this.parties){ if(!p.listOnly) continue; let best=null, bd=1e9;
@@ -15480,7 +15604,9 @@ class Sim {
         + (this.age[i]>40?0.10:0)) * cb, 0.30, 1);
       if(rnd()>=turnout) continue;
       const wv = this.estateOn? this.voteWeight(i) : 1;   // 차등 선거 가중치
-      votes.set(pid,(votes.get(pid)||0)+wv); cast+=wv;
+      // 위성정당 — 모정당 지지자의 비례 표는 위성 명부로(지역구 표는 모정당 그대로)
+      const lv=SAT.has(pid)? SAT.get(pid) : pid;
+      votes.set(lv,(votes.get(lv)||0)+wv); cast+=wv;
       this._castHeads=(this._castHeads||0)+1;   // 투표율 계산용 실제 인원수
       if(nd){
         let dv=pid;
@@ -15490,7 +15616,7 @@ class Sim {
           if(rnd()<stratProb){
             const me=this.parties.find(p=>p.id===pid);
             let best=-1,bd=1e9;
-            if(me) for(const p of this.parties) if(viable.has(p.id)){
+            if(me) for(const p of this.parties) if(viable.has(p.id) && this._canChoose(p, this.region[i])){   // 그 지역에 후보가 있는 당만
               const d=this.partyDist(me.cent,p); if(d<bd){bd=d;best=p.id;} }
             if(best>=0 && bd<2.9) dv=best;
           }
@@ -15644,13 +15770,16 @@ class Sim {
       // 그룹 키: 연합은 'a{id}', 단독은 'p{id}'
       const group=new Map();   // key -> {v, members:[[id,v]]}
       votes.forEach((v,id)=>{
+        // 합산 명부는 공동명부(2단계)만 — 지역구 단일화만 한 연합은 비례 봉쇄조항을 각자 넘는다
         const a=id>=0? this.allianceOf(id):null;
-        const key=a? 'a'+a.id : 'p'+id;
+        const key=(a && (a.depth||1)>=2)? 'a'+a.id : 'p'+id;
         if(!group.has(key))group.set(key,{v:0,members:[]});
         const g=group.get(key); g.v+=v; g.members.push([id,v]);
       });
       // 봉쇄조항은 그룹 단위 (연합 합산으로 함께 넘음)
-      const validG=[...group.values()].filter(g=>g.v/Math.max(cast,1)>=thr);
+      // 연합 봉쇄조항 — 공동명부는 더 높은 문턱(체코 2당 8%·3당 이상 11%, 폴란드 8%). con.coalThr={2:8,3:11}
+      const CT=this.con.coalThr, gThr=g=>{ const k=g.members.length; if(k<2||!CT) return thr; return (CT[Math.min(k,3)] ?? CT[2] ?? thrPct)/100; };
+      const validG=[...group.values()].filter(g=>g.v/Math.max(cast,1)>=gThr(g));
       const vt=validG.reduce((s,g)=>s+g.v,0)||1;
       let assigned=0; const rema=[];
       for(const g of validG){ const q=g.v/vt*total, fl=Math.floor(q); g.seats=fl; assigned+=fl; rema.push(g); }
@@ -16850,6 +16979,7 @@ class Sim {
         for(const o of others){
           if(seats>maj)break;                                  // 하원 과반이면 멈춘다
           if(!this.canCoalesce(lead.id,o.id)) continue;        // 고착된 갈등은 협상 자체가 안 된다
+          if(this.govCoalition.includes(o.id)) continue;         // 전선·블록으로 이미 들어온 당(예전엔 두 번 들어가 '기사련+기사련')
           const dd=this.partyDist(lead.cent,o)*this.cordonAllyBonus(lead,o);
           // 이념 거리가 멀수록 입각 협상이 깨진다(현실의 조각 실패)
           if(dd<2.4 && rnd() < (0.92 - dd*0.30)*this.feudPenalty(lead.id,o.id)){
@@ -17020,6 +17150,12 @@ class Sim {
         gov:this.govCoalition.slice(), govSeats:seats, changed,
       };
       this._presRec=null;
+      // 그때의 연합·블록 구성 — 결과 화면이 '신인민전선 182석 = 굴복하지않는 71 + 사회당 66 …'처럼 보여준다
+      { const seatOf=id=>((rec.results||[]).find(r=>r.id===id)||{}).seats||0, G=[];
+        for(const f of (this.fronts||[])) G.push({name:f.name, kind:'전선', ids:f.members});
+        for(const a of (this.alliances||[])) G.push({name:a.name, kind:(a.depth||1)>=2? '공동명부' : a.govPact===false? '선거 협력' : '선거연합', ids:a.members});
+        for(const g of (this.govBlocs||[])) G.push({name:g.name, kind:'정부 블록', ids:g.members});
+        rec.groups=G.map(g=>({name:g.name, kind:g.kind, members:g.ids.map(id=>({id, seats:seatOf(id)}))})).filter(g=>g.members.some(m=>m.seats>0)); }
       this.elections.push(rec);
       if(this._detectRealign) this._detectRealign(rec);   // 출구조사 교차표 · 결정적 선거 판정 if(this.elections.length>60)this.elections.shift();
       // 저장 크기 관리 — 지역구 승자 목록은 최근 12회분만 남긴다
@@ -17133,7 +17269,10 @@ class Sim {
       // 빅텐트 — 인물 투표 유인이 있으면 당 중심 대신 이 지역구 후보를 본다
       const di = (this._locMean && this.district)? this.district[i] : -1;
       const np = (this.bigTentOn!==false && !this._noNP && this._negPart)? this._negPart(i, tmp) : null;
+      const myReg=this.region[i];
       for(const p of this.parties){
+        if((p.turfR||p.notInR) && !this._canChoose(p, myReg)) continue;   // 활동 지역 밖 — 후보가 없다
+        if(p.satellite) continue;   // 위성정당은 유권자가 고르는 당이 아니다
         const cc = (di>=0 && p.id>=0)? this._candCent(di,p) : null;
         const AW=WV;
         let d=0; for(let k=0;k<6;k++){const x=tmp[k]-p.cent[k];d+=x*x*AW[k];}
@@ -18400,7 +18539,23 @@ class Sim {
     this.referendum=null;
   }
 
-  static get PRESETS(){ return {
+  // 프리셋 목록 = 기본 프리셋 + 유럽 프리셋(10-presets-eu.js)
+  static get PRESETS(){
+    const B=Sim._basePresets();
+    // 과거판 보존 — 백테스트가 쓰는 구도(영국 2019, 프랑스 2022)
+    if(B.uk) B.uk2019=Object.assign({}, B.uk, {label:'🇬🇧 2019 총선'});
+    if(B.france) B.france2022=Object.assign({}, B.france, {label:'🇫🇷 2022 구도'});
+    // 갱신분 — 최근 선거 기준(지역·제도·당명 문화권은 그대로, con은 바꿀 칸만)
+    const PT=Sim._presetPatches? Sim._presetPatches() : {};
+    for(const k in PT) if(B[k]){ const o=B[k], p=PT[k]; B[k]=Object.assign({}, o, p, {con:Object.assign({}, o.con, p.con||{})}); }
+    Object.assign(B, Sim._euPresets? Sim._euPresets() : {});
+    // 실제 연합·블록, 연합 봉쇄조항
+    const BL=Sim._presetBlocs? Sim._presetBlocs() : {}; for(const k in BL) if(B[k]) B[k]=Object.assign({}, B[k], {blocs:BL[k]});
+    if(B.czechia) B.czechia.con=Object.assign({}, B.czechia.con, {coalThr:{2:8,3:11}});
+    if(B.poland)  B.poland.con =Object.assign({}, B.poland.con,  {coalThr:{2:8,3:8}});
+    return B;
+  }
+  static _basePresets(){ return {
     korea:   {resource:0.02, label:'🇰🇷 한국형', moment:{gov:'국민의힘', govYears:2, g:2.0, u:2.8, i:2.3, approval:0.30}, structU:-2, names:{kr:0.7,fr:0.08,intl:0.1,generic:0.12}, form:'PRES',     regions:17, con:{fundLaw:'public',presTerm:5,presLimit:1,presOffset:1,method:'PARALLEL',lowerSeats:300,districtRatio:0.84,threshold:3,term:4,senate:'NONE',presRunoff:false},
               desc:'대통령제 · 병립형(지역구 253+비례 47) · 단원제',
               seed:[ // 거대 양당 + 소수 진보정당, 지역주의 반영
@@ -18685,7 +18840,8 @@ class Sim {
     // 자원 부존은 나라마다 다르다 — 프리셋 값으로 덮어쓴다
     if(P.resource!==undefined){ this.presetResource=P.resource; this.resourceEndow=null; this.initResource(); }
     let regionRenamed=false;
-    if(seedParties){ if(P.seed) this._seedParties(P); regionRenamed=applyRealRegionNames(key);
+    // 지역 이름을 먼저 붙인다 — 정당의 활동 지역(기사련=바이에른)을 이름으로 찾기 때문이다
+    if(seedParties){ regionRenamed=applyRealRegionNames(key); if(P.seed) this._seedParties(P);
       // 정당별 결속력·조직력을 프리셋 값으로 맞춘다
       if(P.seed) for(const sd of P.seed){
         const p=this.parties.find(x=>x.name===sd.name); if(!p) continue;
@@ -18707,14 +18863,20 @@ class Sim {
     const S=this.S;
     if(M.g!=null) S.gdpGrowth=M.g/12;   /* 프리셋 성장률은 연율, 모델은 월간 성장률(경제 규모 ×(1+g/100) 매달) — 예전엔 그대로 넣어 연율 11%로 시작했다 */ if(M.u!=null) S.unemployment=M.u; if(M.i!=null) S.inflation=M.i;
     if(M.phase){ this.boomYears=0; this.bubble=0; this.crisisPhase=M.phase; this.crisisLeft=M.phase==='slump'? 24 : 18; }
+    // 다음 총선까지 남은 개월 — 실제 선거 일정에 맞춘다(없으면 기본 일정)
+    if(M.nextElection!=null) this.lastElection=M.nextElection-this.elecInterval;
     const gov= made.find(p=>p.name===M.gov) || made.slice().sort((a,b)=>b.support-a.support)[0];
     if(gov){ this.govCoalition=[gov.id]; this.govSince=-Math.round((M.govYears||0)*12); }   // 집권 기간 — 틱은 0부터라 음수로 거슬러 올라간다
     // 대통령제·이원집정부제 — 여당 소속 대통령을 심는다. 집권 기간으로 지금 임기의 몇 년째인지(→ 다음 대선)와 재선 여부를 정한다.
     // 예전엔 대통령 없이 시작해 첫 대선이 '공석'에서 치러졌다(프랑스: 3년째 대선에서 국민연합 당선 → 르네상스가 야당이 돼 지지 회복)
     if(gov && (this.govForm==='PRES'||this.govForm==='SEMI') && !this.president){
       const termY=Math.max(1, this.presInterval/12), yrs=Math.max(0, M.presYears ?? M.govYears ?? 0);
-      const inTerm=yrs % termY, served=Math.floor(yrs/termY)+1;
-      this.president={pid:gov.id, since:this.year()-Math.round(inTerm), terms:served, lid:gov.leader? gov.leader.lid : null, personTerms:served};
+      // 임기 횟수는 직접 줄 수 있다(비연속 재선 — 트럼프 2025: 집권 기간으론 첫 임기로 계산된다)
+      const inTerm=yrs % termY, served=M.presTerms ?? (Math.floor(yrs/termY)+1);
+      // 대통령 소속당이 여당과 다르면(동거 — 폴란드 2025) pres로 지정한다
+      const pp=(M.pres && made.find(p=>p.name===M.pres)) || gov;
+      this.president={pid:pp.id, since:this.year()-Math.round(inTerm), terms:served, lid:pp.leader? pp.leader.lid : null, personTerms:served};
+      if(pp!==gov) this.cohabitation=true;
       this.lastPresElection=-Math.round(inTerm*12);
     }
     // 정부 평판 — 심은 지지율이 평상시(약 45%)와 다른 만큼. 원인(실정)이 모델에 없어도 1~2년 만에 증발하지 않게, 서서히 풀린다
@@ -18754,8 +18916,28 @@ class Sim {
         if(made.some(p=>p.name===name)) name=pick(['신','청년','민주'])+name; }
       const np={ id:this.nextPartyId++, name, slogan, color: sd.color || this._pickColor(), colorLocked: !!sd.color,
         cent, rad:sd.rad, support:sd.share, seats:0, founded:this.year(), lowStreak:0, home:-1, factions:null, leader:null };
+      // 활동 지역 — turf: 이 지역에만 후보를 낸다(기사련=바이에른, 스코틀랜드국민당=스코틀랜드), notIn: 이 지역엔 안 낸다
+      const ridx=names=>(names||[]).map(nm=>REGION_NAMES.slice(0,NREG).indexOf(nm)).filter(x=>x>=0);
+      // 실제 조직(DSA·모멘텀…) — 이념 좌표로 바꿔 둔다
+      if(sd.orgs) np.orgs=sd.orgs.map(o=>({name:o.name, str:o.str, size:o.size, cent:Array.from(Sim._pp('',0,'',o.e,o.g,o.p,o.n).cent)}));
+      if(sd.turf){ const r=ridx(sd.turf); if(r.length) np.turfR=r; }
+      if(sd.notIn){ const r=ridx(sd.notIn); if(r.length) np.notInR=r; }
       this.parties.push(np); made.push(np);
     }
+    // 실제 연합·블록 — kind: gov(정부 블록만) · pact(선거만, 공동정부 약속 없음) · coalition(지역구 단일화 + 공동정부) · joint(공동명부 + 공동정부)
+    this.govBlocs=[];
+    for(const bl of (P.blocs||[])){ const ids=bl.members.map(nm=>made.find(p=>p.name===nm)).filter(Boolean).map(p=>p.id); if(ids.length<2) continue;
+      if(bl.kind==='gov'){ this.govBlocs.push({id:this.nextAllyId++, name:bl.name, members:ids}); continue; }
+      const r=this.formAlliance(ids, bl.name); const A=this.alliances[this.alliances.length-1]; if(!r||!r.ok||!A) continue;
+      A.govPact= bl.kind!=='pact'; A.preset=true;
+      if(bl.kind==='joint' && this._promoteAlliance) this._promoteAlliance(A); }
+    // 자매당 — 서로 경쟁하지 않고(상대의 활동 지역엔 후보를 안 낸다) 정부 구성에선 한 몸(기민련/기사련)
+    for(const sd of seed){ if(!sd.sister) continue; const a=made[seed.indexOf(sd)], b=made.find(p=>p.name===sd.sister); if(!a||!b) continue;
+      a.sisterId=b.id; b.sisterId=a.id;
+      if(a.turfR && !b.turfR){ b.notInR=[...new Set([...(b.notInR||[]), ...a.turfR])]; b._notInFromSister=true; }
+      // 지역 안 득표(turfShare)로 주면 전국 비율로 바꾸고, 차이는 자매당 몫으로(합계 유지 — 기민·기사련 28.5%)
+      if(sd.turfShare!=null && a.turfR){ let n=0, t=0; for(let i=0;i<N;i++){ if(this.age[i]<(this.con.voteAge||18)) continue; n++; if(a.turfR.includes(this.region[i])) t++; }
+        const nat=sd.turfShare*t/Math.max(1,n); b.support+= (a.support-nat); a.support=nat; } }
     // ════ 역사 심기 ════
     // 프리셋 정당은 수십 년 역사를 가진 정당인데, 역사(정당일체감·호감·반감) 없이 놓으면 첫 틱에 순수 근접성만 남아
     // 중앙 정당이 쓸어 담는다. 지정 비율을 사전 확률로, 이념 근접성과 반감을 가능도로 써서 확률적으로 배정하고,
@@ -18774,7 +18956,7 @@ class Sim {
     const band=i=> this.age[i]<40? 0 : this.age[i]<60? 1 : 2;
     const like=adults.map(i=>{ this.zvec(i,cz); const b=band(i);
       return made.map((p,k)=>{ let d=0; for(let q=0;q<6;q++) d+=(cz[q]-p.cent[q])**2;
-        return Math.exp(-1.1*d - (p.anti||0)*1.6*(0.4+0.6*this.openness[i])) * (ageW[k]? ageW[k][b] : 1); }); });
+        return (this._canChoose(p, this.region[i])? 1 : 0) * Math.exp(-1.1*d - (p.anti||0)*1.6*(0.4+0.6*this.openness[i])) * (ageW[k]? ageW[k][b] : 1); }); });
     // 반복 보정(레이킹) — 연령대 자료가 있으면 연령대마다, 없으면 전국 비율에 맞춘다.
     // 배율만 곱하면 이념 근접도에 묻혀 세대 차이가 절반만 남는다(영국 노년 보수당 목표 62% → 45%).
     const tgt=made.map(p=>p.support), ts=tgt.reduce((a,b)=>a+b,0);
@@ -18897,6 +19079,325 @@ class Sim {
     }
   }
   // ════════ 내각 구성: 누가 어느 부처를 먹는가 ════════
+  // ════════ 유럽 프리셋 ════════
+  // 정당은 익숙한 네 가지 정치 차원으로 적고, 모델의 6축 심리 좌표로 바꾼다.
+  //   e 경제 좌(−1)~우(+1) · g 자유·탈물질(−1)~권위·전통(+1) · p 반기성 포퓰리즘(0~1) · n 국가주의(+)/지역·소수민족주의(−)
+  // 변환식은 기존 프리셋 정당들의 좌표 관례(녹색 개방성↑, 극우 불안·집단정체성↑, 좌파 박탈감↑, 포퓰리스트 신뢰↓)에서 정했다.
+  // 득표는 가장 최근 총선(정당 명부 기준). 원외 정당은 득표 1.5% 안팎 이상인 주요 정당만.
+  static _pp(name, share, color, e, g, p, n, x){
+    const c=v=>Math.round(clamp(v,-1,1)*100)/100;
+    const cent=[ c(-0.6*g - 0.1*e), c(0.55*Math.max(0,g-0.2) + 0.2*p), c(0.5*g + 0.2*e - 0.1),
+                 c(0.8*n + 0.15*Math.max(0,g)), c(-0.5*e + 0.3*p), c(0.15 - 0.7*p) ];
+    const rad=Math.round(clamp(0.05 + 0.4*p + 0.2*Math.max(0,Math.abs(e)-0.4) + 0.2*Math.max(0,Math.abs(g)-0.4) + 0.15*Math.max(0,Math.abs(n)-0.4), 0.05, 0.8)*100)/100;
+    return Object.assign({name, share, color, cent, rad}, x||{});
+  }
+  static _euPresets(){
+    const P=Sim._pp, NM={generic:0.55, intl:0.2, de:0.25};
+    const R=(key, names)=>{ if(typeof REAL_REGION_NAMES!=='undefined') REAL_REGION_NAMES[key]=names; return names.length; };
+    return {
+      finland: {label:'🇫🇮 핀란드형', names:NM, structU:2.0, form:'PARL', regions:R('finland',['우시마','피르칸마','바르시나이스수오미','북포흐얀마','중앙핀란드','사타쿤타','하메','남사보','북사보','카렐리아','라플란드','올란드']),
+        moment:{gov:'국민연합당', govYears:3},
+        con:{fundLaw:'public', method:'PR', lowerSeats:200, threshold:0, prScope:'regional', prMethod:'dhondt', term:4, senate:'NONE'},
+        desc:'2023 총선 — 국민연합당·핀란드인당·사회민주당 3강, 지역구별 동트 비례(봉쇄조항 없음). 오르포 연정(국민연합·핀란드인·스웨덴인민·기독민주)',
+        seed:[ P('국민연합당',0.208,'#006288',0.6,0.1,0,0.1), P('핀란드인당',0.201,'#FFDE55',0.2,0.7,0.6,0.8,{anti:0.25}),
+               P('사회민주당',0.199,'#E11931',-0.4,-0.2,0.05,0), P('중앙당',0.113,'#01954B',0.1,0.3,0.1,0.1),
+               P('좌파동맹',0.071,'#F00A64',-0.8,-0.5,0.2,-0.1), P('녹색동맹',0.070,'#61BF1A',-0.3,-0.8,0.05,-0.1),
+               P('스웨덴인민당',0.043,'#FFC20E',0.3,-0.3,0,-0.6), P('기독민주당',0.042,'#2B67C9',0.2,0.7,0.1,0.2),
+               P('지금운동',0.024,'#B5307A',0.4,0,0.5,0), P('올란드연합',0.004,'#0064AD',0.1,0,0,-0.8,{turf:['올란드']}) ]},
+      austria: {label:'🇦🇹 오스트리아형', names:{generic:0.4, intl:0.15, de:0.45}, structU:0, form:'PARL', regions:R('austria',['빈','니더외스터라이히','오버외스터라이히','슈타이어마르크','티롤','케른텐','잘츠부르크','포어아를베르크','부르겐란트']),
+        moment:{gov:'국민당', govYears:1.5},
+        con:{fundLaw:'public', method:'PR', lowerSeats:183, threshold:4, prMethod:'hare', term:5, senate:'FEDERAL', senSeats:61, senPower:0.2},
+        desc:'2024 총선 — 자유당 첫 1위(28.8%)에도 방역선. 국민당·사회민주당·네오스 3당 연정(2025)',
+        seed:[ P('자유당',0.288,'#005DA8',0.3,0.8,0.7,0.8,{anti:0.4}), P('국민당',0.263,'#63C3D0',0.5,0.4,0,0.3),
+               P('사회민주당',0.211,'#E31E2D',-0.5,-0.2,0.1,0), P('네오스',0.091,'#E84188',0.6,-0.5,0.05,-0.1),
+               P('녹색당',0.082,'#88B626',-0.4,-0.8,0.05,-0.1), P('공산당',0.024,'#AA0000',-0.9,-0.6,0.4,-0.1),
+               P('맥주당',0.020,'#F2C200',0,-0.3,0.6,0) ]},
+      portugal: {label:'🇵🇹 포르투갈형', names:{generic:0.45, intl:0.2, latin:0.35}, structU:1.5, form:'PARL', regions:R('portugal',['리스본','포르투','브라가','세투발','아베이루','코임브라','레이리아','파루','비제우','알렌테주','마데이라','아소르스']),
+        moment:{gov:'민주동맹', govYears:2},
+        con:{fundLaw:'public', method:'PR', lowerSeats:230, threshold:0, prScope:'regional', prMethod:'dhondt', term:4, senate:'NONE'},
+        desc:'2025 총선 — 민주동맹 1위, 셰가가 사회당을 제치고 제2당(60석). 선거구별 동트 비례',
+        seed:[ P('민주동맹',0.321,'#FF8C00',0.4,0.3,0,0.2), P('셰가',0.228,'#202056',0.3,0.8,0.8,0.8,{anti:0.4}),
+               P('사회당',0.228,'#E75480',-0.4,-0.2,0.05,0), P('자유주의 이니셔티브',0.054,'#00ADEF',0.8,-0.3,0.1,0),
+               P('리브르',0.042,'#8DC63F',-0.5,-0.8,0.1,-0.1), P('단일민주연합',0.029,'#E2001A',-0.9,0.1,0.3,0.1),
+               P('좌파블록',0.020,'#8B0000',-0.8,-0.7,0.3,-0.1), P('사람·동물·자연',0.014,'#00796B',-0.2,-0.8,0.1,0),
+               P('함께인민을위하여',0.003,'#00A3A3',0,0.1,0.2,-0.6) ]},
+      poland: {label:'🇵🇱 폴란드형', names:{generic:0.6, intl:0.2, de:0.2}, structU:-1, form:'SEMI', regions:R('poland',['마조프셰','실롱스크','비엘코폴스카','마워폴스카','돌누이실롱스크','우치','포모제','루블린','포트카르파치에','쿠야비아포모제','서포모제','바르미아마주리','스비엥토크시스키에','포들라스키에','루부시','오폴레']),
+        moment:{gov:'시민연합', govYears:2.8, pres:'법과정의', presYears:1},
+        con:{fundLaw:'public', method:'PR', lowerSeats:460, threshold:5, prScope:'regional', prMethod:'dhondt', term:4, senate:'POPULAR', senSeats:100, senPower:0.4, presTerm:5, presLimit:2, presRunoff:true},
+        desc:'2023 총선 — 법과정의 1위에도 시민연합·제3의 길·좌파가 정권 교체. 2025년 법과정의 계열 대통령 당선으로 동거',
+        seed:[ P('법과정의',0.354,'#263778',-0.2,0.8,0.5,0.7,{anti:0.3}), P('시민연합',0.307,'#F68F2D',0.2,-0.3,0.05,0.1),
+               P('폴란드국민당',0.080,'#1BB100',0.1,0.5,0.1,0.3), P('폴란드 2050',0.064,'#F9C300',0.2,-0.2,0.2,0.1),
+               P('신좌파',0.066,'#D7002C',-0.6,-0.6,0.1,0), P('연맹',0.072,'#122B52',0.8,0.7,0.7,0.8,{anti:0.4}),
+               P('함께',0.020,'#870F57',-0.8,-0.6,0.3,0), P('폴란드왕관연맹',0.020,'#6B4226',0.4,1.0,0.9,1.0,{anti:0.55}) ]},
+      ireland: {label:'🇮🇪 아일랜드형', names:{generic:0.5, intl:0.2, anglo:0.3}, structU:0.5, form:'PARL', regions:R('ireland',['더블린','코크','골웨이','리머릭','킬데어','미스','도니골','케리','워터퍼드','메이오','웩스퍼드','라우스']),
+        moment:{gov:'피어너 팔', govYears:1.5},
+        con:{fundLaw:'public', method:'STV', lowerSeats:174, sntvMag:4, term:5, senate:'INDIRECT', senSeats:60, senPower:0.15},
+        desc:'2024 총선 — 단기이양식(STV) 다인 선거구. 피어너 팔·통일아일랜드당 연정, 신페인 제1야당. 무소속이 많다',
+        seed:[ P('피어너 팔',0.219,'#66BB66',0.1,0.1,0,0.3), P('통일아일랜드당',0.208,'#6699FF',0.4,0,0,0.2),
+               P('신페인',0.190,'#326760',-0.6,-0.1,0.4,0.7), P('사회민주당',0.048,'#752F8B',-0.5,-0.6,0.1,0.1),
+               P('노동당',0.047,'#CC0000',-0.4,-0.5,0.05,0.1), P('아온투',0.039,'#44532A',-0.2,0.7,0.5,0.6),
+               P('아일랜드 독립당',0.036,'#00A99D',0.2,0.5,0.5,0.4), P('사람이 이윤보다 먼저',0.031,'#8E2420',-0.9,-0.6,0.5,0.3),
+               P('녹색당',0.030,'#22AC6F',-0.2,-0.8,0,0) ]},
+      sweden: {label:'🇸🇪 스웨덴형', names:NM, structU:3.0, form:'CONSTMON', regions:R('sweden',['스톡홀름','베스트라예탈란드','스코네','외스테르예틀란드','웁살라','옌셰핑','할란드','외레브로','베스테르노를란드','달라나','노르보텐','고틀란드']),
+        moment:{gov:'사회민주당', govYears:0.05, approval:0.50},
+        con:{fundLaw:'public', method:'PR', lowerSeats:349, threshold:4, prMethod:'sainte', term:4, senate:'NONE'},
+        desc:'2026 총선 — 좌파 블록 176 대 우파(티되) 블록 173으로 정권 교체. 사회민주당 99석(한 세기 만의 최저), 스웨덴민주당 첫 하락. 새 정부는 사회민주당 주도로 가정',
+        seed:[ P('사회민주당',0.281,'#E8112D',-0.4,-0.1,0.05,0.1), P('온건당',0.199,'#1B49DD',0.6,0.2,0,0.2),
+               P('스웨덴민주당',0.176,'#DDB000',0.2,0.8,0.6,0.8,{anti:0.4}), P('좌파당',0.085,'#AF0000',-0.8,-0.6,0.3,0),
+               P('중앙당',0.071,'#009933',0.4,-0.4,0.05,0), P('기독민주당',0.063,'#231977',0.4,0.6,0.1,0.3),
+               P('녹색당',0.063,'#83CF39',-0.4,-0.8,0.1,-0.1), P('자유당',0.054,'#006AB3',0.5,-0.3,0,0.1) ]},
+      norway: {label:'🇳🇴 노르웨이형', names:NM, structU:0.5, form:'CONSTMON', regions:R('norway',['오슬로','아케르스후스','로갈란','베스틀란','트뢰넬라그','이노란데트','뫼레오그롬스달','노를란','트롬스','핀마르크','아그데르','텔레마르크']),
+        moment:{gov:'노동당', govYears:5, approval:0.40},
+        con:{fundLaw:'public', method:'PR', lowerSeats:169, threshold:4, prMethod:'sainte', term:4, senate:'NONE'},
+        desc:'2025 총선 — 노동당 28% 재집권(스퇴레 소수정부), 진보당 23.8%로 제2당. 9개 정당 원내',
+        seed:[ P('노동당',0.280,'#E4202C',-0.4,-0.1,0.05,0.1), P('진보당',0.238,'#004F80',0.6,0.6,0.6,0.6,{anti:0.3}),
+               P('보수당',0.146,'#87ADD7',0.6,0.1,0,0.2), P('사회주의좌파당',0.056,'#BC0042',-0.7,-0.6,0.2,0),
+               P('중앙당',0.056,'#00843D',-0.1,0.4,0.3,0.3), P('적색당',0.053,'#7B0000',-0.9,-0.5,0.4,0),
+               P('녹색당',0.047,'#6A9325',-0.3,-0.8,0.1,-0.1), P('기독민주당',0.042,'#FFBF00',0.2,0.8,0.1,0.2),
+               P('자유당',0.037,'#00807F',0.4,-0.5,0,0) ]},
+      iceland: {label:'🇮🇸 아이슬란드형', names:NM, structU:0.5, form:'PARL', regions:R('iceland',['레이캬비크 북','레이캬비크 남','남서부','북서부','북동부','남부']),
+        moment:{gov:'사회민주연합', govYears:1.8, approval:0.45},
+        con:{fundLaw:'public', method:'PR', lowerSeats:63, threshold:5, prScope:'regional', prMethod:'dhondt', term:4, senate:'NONE'},
+        desc:'2024 조기 총선 — 독립당 장기 집권 끝, 사회민주연합·개혁당·인민당 3당 연정(프로스타도티르). 좌파녹색·해적당 원외 탈락',
+        seed:[ P('사회민주연합',0.208,'#EA0038',-0.3,-0.4,0.05,0), P('독립당',0.194,'#00ADEF',0.6,0.3,0,0.3),
+               P('개혁당',0.158,'#FF7D14',0.5,-0.4,0,-0.1), P('인민당',0.138,'#FFCA3E',-0.5,0.3,0.6,0.3),
+               P('중앙당',0.121,'#002B5C',0.3,0.6,0.5,0.6), P('진보당',0.078,'#00683F',0.1,0.4,0.1,0.3),
+               P('사회주의당',0.040,'#EF4135',-0.9,-0.4,0.6,0), P('해적당',0.030,'#8D4B9F',-0.2,-0.8,0.4,-0.1),
+               P('좌파녹색운동',0.023,'#4C9A3E',-0.7,-0.8,0.1,0) ]},
+      estonia: {label:'🇪🇪 에스토니아형', names:NM, structU:1.0, form:'PARL', regions:R('estonia',['탈린','하르유','타르투','이다비루','패르누','라네비루','사레마','빌랸디','발가','레네','라플라','요게바']),
+        moment:{gov:'개혁당', govYears:5.5, approval:0.22},
+        con:{fundLaw:'public', method:'PR', lowerSeats:101, threshold:5, prScope:'regional', prMethod:'dhondt', term:4, senate:'NONE'},
+        desc:'2023 총선 — 개혁당 31.2% 압승 후 지지 급락. 보수인민당·중앙당(러시아어 사용자 기반)·에스토니아 200·사민·조국당',
+        seed:[ P('개혁당',0.312,'#FFDE00',0.7,-0.3,0,0.1), P('에스토니아보수인민당',0.161,'#0C2A64',0.2,0.9,0.7,0.9,{anti:0.4}),
+               P('중앙당',0.153,'#007557',-0.3,0.2,0.2,-0.6), P('에스토니아 200',0.133,'#00B6EB',0.4,-0.6,0.1,0),
+               P('사회민주당',0.093,'#E10600',-0.5,-0.4,0.05,0), P('조국당',0.082,'#009BDE',0.5,0.6,0.1,0.5),
+               P('우파당',0.023,'#F2A900',0.6,0,0,0.2), P('녹색당',0.010,'#97C93D',-0.3,-0.8,0.2,0) ]},
+      latvia: {label:'🇱🇻 라트비아형', names:NM, structU:1.5, form:'PARL', regions:R('latvia',['리가','비제메','라트갈레','젬갈레','쿠르제메']),
+        moment:{gov:'새로운 통합', govYears:7, approval:0.22},
+        con:{fundLaw:'public', method:'PR', lowerSeats:100, threshold:5, prScope:'regional', prMethod:'sainte', term:4, senate:'NONE'},
+        desc:'2026년 10월 총선 직전 여론 추세 기준(공식 결과 미반영) — 연합명부 선두, 주권세력·라트비아 우선 약진. 실리냐 연정(새로운 통합·녹색농민·진보)',
+        seed:[ P('연합명부',0.240,'#5B9B39',0.2,0.3,0.2,0.3), P('주권세력',0.130,'#7A2E8C',-0.2,0.6,0.8,-0.5),
+               P('라트비아 우선',0.130,'#9E1B32',0.4,0.7,0.7,0.3), P('진보당',0.125,'#E64B8A',-0.4,-0.7,0.1,0.1),
+               P('국민연합',0.100,'#7F0000',0.4,0.8,0.3,1.0), P('새로운 통합',0.080,'#0E5CA8',0.5,-0.2,0,0.3),
+               P('녹색농민연합',0.080,'#30A050',0.1,0.4,0.2,0.3), P('안정을!',0.035,'#2F4F4F',-0.2,0.5,0.8,-0.3),
+               P('화합',0.030,'#D4002A',-0.5,0.3,0.3,-0.8) ]},
+      lithuania: {label:'🇱🇹 리투아니아형', names:NM, structU:1.5, form:'PARL', regions:R('lithuania',['빌뉴스','카우나스','클라이페다','샤울랴이','파네베지스','알리투스','마리얌폴레','우테나','텔셰이','타우라게']),
+        moment:{gov:'사회민주당', govYears:1.8, approval:0.30},
+        con:{fundLaw:'public', method:'PARALLEL', lowerSeats:141, districtRatio:0.5, threshold:5, term:4, senate:'NONE'},
+        desc:'2024 총선 — 사회민주당 1위, 신생 포퓰리스트 네무나스의 새벽 15% 돌풍. 지역구 71 + 비례 70 병립제. 폴란드계 정당은 지역 기반',
+        seed:[ P('사회민주당',0.193,'#D82034',-0.4,0,0.1,0.1), P('조국연합–기독민주당',0.180,'#00A6D6',0.5,0.3,0,0.4),
+               P('네무나스의 새벽',0.153,'#EF7F1A',0,0.7,0.9,0.6,{anti:0.4}), P('민주연합 리투아니아를 위하여',0.092,'#B22B33',-0.1,0,0.1,0.1),
+               P('자유주의운동',0.078,'#F28C28',0.7,-0.5,0,0), P('농민녹색연합',0.070,'#00A651',-0.2,0.5,0.4,0.3),
+               P('폴란드인선거행동',0.037,'#E10024',-0.2,0.7,0.2,-0.9), P('자유당',0.035,'#E5007E',0.4,-0.9,0.1,-0.1) ]},
+      belgium: {label:'🇧🇪 벨기에형', names:{generic:0.45, intl:0.2, de:0.2, fr:0.15}, structU:1.5, form:'CONSTMON', regions:R('belgium',['브뤼셀','안트베르펜','동플랑드르','서플랑드르','플랑드르브라반트','림뷔르흐','에노','리에주','왈롱브라반트','나뮈르','뤽상부르']),
+        moment:{gov:'새플랑드르연합', govYears:1.6, approval:0.35},
+        con:{fundLaw:'public', method:'PR', lowerSeats:150, threshold:5, prScope:'regional', prMethod:'dhondt', term:5, senate:'INDIRECT', senSeats:60, senPower:0.1},
+        desc:'2024 총선 — 언어권별 정당 체계(플랑드르·왈롱). 새플랑드르연합 1위, 플랑드르의 이익은 방역선. 더 베버 "애리조나" 5당 연정',
+        seed:[ P('새플랑드르연합',0.167,'#FFED00',0.5,0.4,0.2,-0.6,{turf:['브뤼셀','안트베르펜','동플랑드르','서플랑드르','플랑드르브라반트','림뷔르흐']}), P('플랑드르의 이익',0.138,'#2B2B2B',0.3,0.9,0.7,-0.7,{anti:0.55, turf:['브뤼셀','안트베르펜','동플랑드르','서플랑드르','플랑드르브라반트','림뷔르흐']}),
+               P('개혁운동',0.103,'#0047AB',0.6,0.2,0.05,0.1,{turf:['브뤼셀','에노','리에주','왈롱브라반트','나뮈르','뤽상부르']}), P('노동당(PVDA–PTB)',0.099,'#AA0000',-0.9,-0.3,0.5,0.1,{anti:0.3}),
+               P('전진(Vooruit)',0.081,'#FF2900',-0.4,-0.1,0.1,-0.3,{turf:['브뤼셀','안트베르펜','동플랑드르','서플랑드르','플랑드르브라반트','림뷔르흐']}), P('사회당',0.080,'#E30613',-0.5,-0.3,0.1,0.2,{turf:['브뤼셀','에노','리에주','왈롱브라반트','나뮈르','뤽상부르']}),
+               P('기독민주플랑드르',0.072,'#FF8000',0.2,0.3,0,-0.3,{turf:['브뤼셀','안트베르펜','동플랑드르','서플랑드르','플랑드르브라반트','림뷔르흐']}), P('참여하는 사람들',0.068,'#00C3B3',0.1,0.1,0,0.1,{turf:['브뤼셀','에노','리에주','왈롱브라반트','나뮈르','뤽상부르']}),
+               P('열린 자유민주',0.055,'#003D6D',0.7,-0.4,0,-0.2,{turf:['브뤼셀','안트베르펜','동플랑드르','서플랑드르','플랑드르브라반트','림뷔르흐']}), P('녹색(Groen)',0.047,'#83C341',-0.4,-0.8,0.05,-0.2,{turf:['브뤼셀','안트베르펜','동플랑드르','서플랑드르','플랑드르브라반트','림뷔르흐'], sister:'에콜로'}),
+               P('에콜로',0.030,'#00A35C',-0.4,-0.8,0.05,0.1,{turf:['브뤼셀','에노','리에주','왈롱브라반트','나뮈르','뤽상부르']}), P('데피',0.012,'#E2007A',0.2,-0.3,0,0.4,{turf:['브뤼셀','에노','리에주','왈롱브라반트','나뮈르','뤽상부르']}) ]},
+      greece: {label:'🇬🇷 그리스형', names:{generic:0.5, intl:0.2, latin:0.3}, structU:5.0, form:'PARL', regions:R('greece',['아티키','중앙마케도니아','테살리아','서그리스','크레타','동마케도니아·트라키','중앙그리스','펠로폰네소스','에피루스','서마케도니아','남에게해','북에게해']),
+        moment:{gov:'신민주주의당', govYears:7, approval:0.30},
+        con:{fundLaw:'public', method:'PR', lowerSeats:300, threshold:3, prScope:'regional', prMethod:'hare', term:4, senate:'NONE'},
+        desc:'2023년 6월 총선 — 신민주주의당 40.6% 단독 과반(실제론 1위 보너스 의석제, 모델은 근사). 시리자 붕괴, 극우 군소정당 다수 원내',
+        seed:[ P('신민주주의당',0.406,'#0060AE',0.5,0.4,0,0.4), P('시리자',0.178,'#EF4B6C',-0.6,-0.4,0.2,0.1),
+               P('파속',0.118,'#2DB34A',-0.2,-0.2,0.05,0.2), P('공산당',0.077,'#E2001A',-1.0,0.2,0.5,0.3),
+               P('스파르타인',0.046,'#1E3A8A',0.3,1.0,0.8,1.0,{anti:0.5}), P('그리스 해법',0.044,'#3A6FB0',0.3,0.9,0.7,0.9),
+               P('승리',0.037,'#5A4AA0',0,1.0,0.5,0.8), P('자유의 항로',0.032,'#7B2E8A',-0.4,0.1,0.7,0.5),
+               P('메라25',0.025,'#E2421B',-0.7,-0.6,0.6,0) ]},
+      czechia: {label:'🇨🇿 체코형', names:NM, structU:-1.5, form:'PARL', regions:R('czechia',['프라하','중앙보헤미아','남보헤미아','플젠','카를로비바리','우스티','리베레츠','흐라데츠크랄로베','파르두비체','비소치나','남모라바','올로모우츠','즐린','모라바실레시아']),
+        moment:{gov:'ANO 2011', govYears:0.8, approval:0.45},
+        con:{fundLaw:'public', method:'PR', lowerSeats:200, threshold:5, prScope:'regional', prMethod:'dhondt', term:4, senate:'POPULAR', senSeats:81, senPower:0.3},
+        desc:'2025 총선 — 바비시의 ANO 34.5% 압승, 자유와 직접민주주의·운전자당과 연정. 피알라의 함께 연합 실각',
+        seed:[ P('ANO 2011',0.345,'#261060',0.1,0.4,0.6,0.4), P('함께(SPOLU)',0.234,'#23176E',0.6,0.2,0,0.2),
+               P('시장과 무소속',0.112,'#5D8C00',0.3,-0.4,0.1,0), P('해적당',0.090,'#000000',-0.1,-0.8,0.3,-0.1),
+               P('자유와 직접민주주의',0.078,'#2D3C8A',0.2,0.9,0.8,0.9,{anti:0.4}), P('운전자당',0.068,'#4D4D4D',0.6,0.5,0.6,0.4),
+               P('그만!',0.043,'#C41E3A',-0.8,0.6,0.8,0.6) ]},
+      slovakia: {label:'🇸🇰 슬로바키아형', names:NM, structU:3.0, form:'PARL', regions:R('slovakia',['브라티슬라바','트르나바','트렌친','니트라','질리나','반스카비스트리차','프레쇼우','코시체']),
+        moment:{gov:'방향–사회민주주의', govYears:3, approval:0.30},
+        con:{fundLaw:'public', method:'PR', lowerSeats:150, threshold:5, prMethod:'hare', term:4, senate:'NONE'},
+        desc:'2023 총선 — 피초의 방향(스메르) 1위, 목소리·국민당과 연정. 진보 슬로바키아 제2당. 공화국·헝가리계 연합은 원외',
+        seed:[ P('방향–사회민주주의',0.229,'#D81E05',-0.4,0.7,0.6,0.7), P('진보 슬로바키아',0.180,'#1E3A8A',0.3,-0.8,0.05,-0.1),
+               P('목소리–사회민주주의',0.147,'#7A1D3B',-0.4,0.3,0.3,0.4), P('슬로바키아 운동',0.089,'#0A8A4A',0.2,0.4,0.7,0.2),
+               P('기독민주운동',0.068,'#0072BC',0.3,0.8,0.1,0.3), P('자유와 연대',0.063,'#A0C53A',0.8,-0.5,0.2,0),
+               P('슬로바키아국민당',0.056,'#1F3B73',-0.1,0.9,0.5,1.0), P('공화국',0.048,'#2B2B5A',0.3,0.9,0.8,0.9,{anti:0.45}),
+               P('헝가리계 연합',0.044,'#1E8F3E',0.2,0.3,0.1,-0.9) ]},
+      romania: {label:'🇷🇴 루마니아형', names:{generic:0.5, intl:0.2, latin:0.3}, structU:2.0, form:'SEMI', regions:R('romania',['부쿠레슈티','일포브','클루지','티미슈','이아시','콘스탄차','브라쇼브','프라호바','돌지','비호르','하르기타','수체아바']),
+        moment:{gov:'국민자유당', govYears:1.3, pres:'구국연합', presYears:1.4, approval:0.25},
+        con:{fundLaw:'public', method:'PR', lowerSeats:331, threshold:5, prScope:'regional', prMethod:'dhondt', term:4, senate:'POPULAR', senSeats:136, senPower:0.4, presTerm:5, presLimit:2, presRunoff:true},
+        desc:'2024 총선 — 사민당 1위, 극우 루마니아인통합동맹 18% 약진. 볼로잔 친유럽 연정. 대통령 니쿠쇼르 단(구국연합 출신 무소속, 2025)',
+        seed:[ P('사회민주당',0.219,'#ED2128',-0.3,0.4,0.2,0.4), P('루마니아인통합동맹',0.180,'#FFCC00',0.1,0.9,0.8,1.0,{anti:0.4}),
+               P('국민자유당',0.132,'#FFDD00',0.6,0.2,0,0.2), P('구국연합',0.124,'#00A6FF',0.4,-0.6,0.3,0),
+               P('SOS 루마니아',0.074,'#1F3B7A',0,1.0,0.9,1.0,{anti:0.5}), P('젊은이당',0.065,'#2E8B57',0,0.8,0.9,0.8,{anti:0.4}),
+               P('헝가리인민주연합',0.063,'#15803D',0.2,0.4,0,-0.9) ]},
+      bulgaria: {label:'🇧🇬 불가리아형', names:NM, structU:1.0, form:'PARL', regions:R('bulgaria',['소피아시','소피아주','플로브디프','바르나','부르가스','스타라자고라','루세','플레벤','블라고에브그라드','하스코보','쿠르잘리','비딘']),
+        moment:{gov:'진보 불가리아', govYears:0.4, approval:0.55},
+        con:{fundLaw:'public', method:'PR', lowerSeats:240, threshold:4, prScope:'regional', prMethod:'hare', term:4, senate:'NONE'},
+        desc:'2026년 4월 조기 총선(5년간 8번째) — 라데프 전 대통령의 진보 불가리아 44.6% 단독 과반. 사회당·위대함 등 원외 탈락',
+        seed:[ P('진보 불가리아',0.446,'#D7263D',-0.3,0.5,0.6,0.6), P('GERB–민주세력연합',0.133,'#1F5BA8',0.4,0.3,0.1,0.3),
+               P('변화를 계속한다–민주 불가리아',0.126,'#FFD400',0.4,-0.6,0.2,0), P('권리와 자유를 위한 운동',0.071,'#1E40AF',0.1,0.2,0.2,-0.8),
+               P('부흥',0.043,'#2F6E3B',-0.1,0.9,0.8,1.0,{anti:0.45}), P('도덕·통합·명예',0.032,'#3B3B6B',0.1,0.8,0.8,0.8),
+               P('위대함',0.031,'#6B3E1F',0,0.9,0.8,0.9), P('사회당',0.030,'#DB0F28',-0.6,0.5,0.3,0.6),
+               P('광휘',0.029,'#F59E0B',-0.1,0.1,0.6,0.2) ]},
+      croatia: {label:'🇭🇷 크로아티아형', names:NM, structU:2.0, form:'PARL', regions:R('croatia',['자그레브시','자그레브주','스플리트달마치야','오시예크바라냐','프리모레고르스키코타르','이스트라','자다르','시베니크크닌','두브로브니크네레트바','바라주딘','시사크모슬라비나','부코바르스리옘']),
+        moment:{gov:'크로아티아민주연합', govYears:10, approval:0.35},
+        con:{fundLaw:'public', method:'PR', lowerSeats:151, threshold:5, prScope:'regional', prMethod:'dhondt', term:4, senate:'NONE'},
+        desc:'2024 총선 — 플렌코비치의 크로아티아민주연합 1위, 조국운동과 연정. 사민당 중심 정의의 강 연합 제2당',
+        seed:[ P('크로아티아민주연합',0.344,'#0B4DA2',0.4,0.5,0,0.5), P('사회민주당',0.254,'#E1001A',-0.4,-0.3,0.1,0),
+               P('조국운동',0.096,'#1D3D8C',0.3,0.9,0.6,0.9,{anti:0.35}), P('우리는 할 수 있다',0.091,'#00A651',-0.6,-0.8,0.2,0),
+               P('다리',0.080,'#F37021',0.4,0.7,0.5,0.6), P('이스트라민주의회',0.022,'#00843D',0.2,-0.3,0,-0.7),
+               P('집중',0.022,'#6D28D9',0.6,-0.2,0.3,0) ]},
+      slovenia: {label:'🇸🇮 슬로베니아형', names:NM, structU:0.5, form:'PARL', regions:R('slovenia',['류블랴나','마리보르','첼레','크라니','코페르','노보메스토','무르스카소보타','노바고리차']),
+        moment:{gov:'슬로베니아민주당', govYears:0.4, approval:0.45},
+        con:{fundLaw:'public', method:'PR', lowerSeats:90, threshold:4, prScope:'regional', prMethod:'dhondt', term:4, senate:'INDIRECT', senSeats:40, senPower:0.1},
+        desc:'2026년 3월 총선 — 자유운동 28.6% 대 슬로베니아민주당 28.0% 박빙. 우파 48석으로 얀샤 총리 선출',
+        seed:[ P('자유운동',0.286,'#00A0DC',-0.1,-0.5,0.1,0), P('슬로베니아민주당',0.280,'#FFD100',0.4,0.8,0.5,0.8),
+               P('새로운 슬로베니아 연합',0.088,'#1F4E9A',0.4,0.6,0,0.4), P('사회민주당',0.065,'#E30613',-0.4,-0.3,0.05,0),
+               P('민주당',0.065,'#1E3A8A',0.4,0.2,0.1,0.2), P('좌파–베스나',0.055,'#B5003B',-0.8,-0.8,0.3,0),
+               P('진실(Resni.ca)',0.050,'#4B5563',0,0.6,0.9,0.5,{anti:0.35}) ]},
+    };
+  }
+  // ════════ 실제 연합·블록 ════════
+  // gov: 정부만 함께(선거 협력 없음) · coalition: 지역구 단일화 + 공동정부 · joint: 공동명부 + 공동정부 · pact: 선거만
+  static _presetBlocs(){
+    return {
+      france: [ {kind:'coalition', name:'신인민전선', members:['굴복하지않는프랑스','사회당','녹색당','공산당']},
+                {kind:'coalition', name:'앙상블', members:['르네상스','민주운동','지평']},
+                {kind:'coalition', name:'국민연합–우파공화연합', members:['국민연합','우파공화연합']} ],
+      italy:  [ {kind:'coalition', name:'우파 연합', members:['이탈리아형제들','동맹','전진이탈리아','우리는 온건파']},
+                {kind:'coalition', name:'중도좌파 연합', members:['민주당','이탈리아좌파','플러스 유럽']} ],
+      denmark:[ {kind:'gov', name:'적색 블록', members:['사회민주당','사회주의인민당','급진자유당','적녹연합','대안당']},
+                {kind:'gov', name:'청색 블록', members:['자유당','보수인민당','자유동맹','덴마크인민당','덴마크민주당','시민당']} ],
+      sweden: [ {kind:'gov', name:'티되 블록', members:['온건당','기독민주당','자유당','스웨덴민주당']},
+                {kind:'gov', name:'적녹 블록', members:['사회민주당','좌파당','녹색당','중앙당']} ],
+      japan:  [ {kind:'gov', name:'자민–유신 연정', members:['자유민주당','일본유신회']} ],
+      netherlands:[ {kind:'gov', name:'예턴 내각', members:['민주66','자유민주국민당','기독민주호소당']} ],
+      austria:[ {kind:'gov', name:'3당 연정', members:['국민당','사회민주당','네오스']} ],
+      poland: [ {kind:'gov', name:'10월 15일 연합', members:['시민연합','폴란드국민당','폴란드 2050','신좌파']} ],
+      czechia:[ {kind:'gov', name:'바비시 연정', members:['ANO 2011','자유와 직접민주주의','운전자당']} ],
+      spain:  [ {kind:'gov', name:'진보 연정', members:['사회노동당','수마르']} ],
+    };
+  }
+  // ════════ 기존 프리셋 갱신 — 최근 선거 기준, 원내 정당 전부 + 주요 원외 정당 ════════
+  // 기존 프리셋의 지역·제도·당명 문화권은 살리고 정당 목록·시작 상태·설명만 바꾼다(con은 바꿀 칸만 덧붙인다).
+  // 영국 2019·프랑스 2022 구도는 백테스트에 쓰여 uk2019·france2022로 보존한다(Sim.PRESETS 참고).
+  static _presetPatches(){
+    const P=Sim._pp;
+    return {
+      usa: { label:'🇺🇸 미국형', moment:{gov:'공화당', govYears:1.9, presYears:1.9, presTerms:2, nextElection:1, g:2.0, u:4.3, i:2.9, approval:0.40},
+        desc:'2024 선거 — 트럼프 재집권(비연속 두 번째 임기, 연임 제한), 공화당이 상·하원 장악. 2026 중간선거 직전. 원외 자유당·녹색당·헌법당·전진당',
+        seed:[ P('공화당',0.495,'#D02020',0.5,0.7,0.5,0.7,{age:[45,53,51], orgs:[{name:'프리덤 코커스', e:0.7, g:0.8, p:0.7, n:0.7, str:0.6, size:0.15}]}), P('민주당',0.480,'#2255CC',-0.4,-0.5,0.1,0,{age:[52,45,48], org:0.38, disc:0.48, faction:0.8, orgs:[{name:'DSA', e:-0.9, g:-0.7, p:0.5, n:0, str:0.75, size:0.12}]}),
+               P('자유당',0.010,'#FED105',0.9,-0.3,0.5,0.1,{age:[2,1,0.5]}), P('녹색당',0.006,'#17AA5C',-0.7,-0.8,0.5,0,{age:[1.5,0.5,0.3]}),
+               P('헌법당',0.002,'#A0522D',0.6,1.0,0.6,0.8), P('전진당',0.002,'#6B21A8',0.2,-0.2,0.2,0) ]},
+      korea: { label:'🇰🇷 한국형', moment:{gov:'더불어민주당', govYears:1.3, g:1.0, u:2.8, i:2.0, approval:0.55},
+        con:{districtRatio:0.847, method:'SEMIMMP', partialRate:0.5},   // 2024 실제 제도 — 준연동형(연동률 50%), 위성정당이 생길 수 있다
+        desc:'22대 국회(2024, 지역구 254·비례 46)와 2025년 정권 교체(더불어민주당 대통령). 득표는 2024 비례(위성정당·교차투표로 왜곡) 대신 대선 이후 정당 지지에 가깝게',
+        seed:[ P('더불어민주당',0.44,'#152484',-0.3,-0.2,0.15,0.1,{orgs:[{name:'더민주혁신회의', e:-0.4, g:-0.2, p:0.4, n:0.1, str:0.6, size:0.35}]}), P('국민의힘',0.33,'#E61E2B',0.4,0.5,0.1,0.4),
+               P('조국혁신당',0.06,'#0073CF',-0.4,-0.3,0.4,0.1), P('개혁신당',0.05,'#FF7210',0.4,-0.1,0.3,0.1),
+               P('진보당',0.02,'#D6001C',-0.8,-0.3,0.5,0.3), P('정의당',0.02,'#FFCC00',-0.6,-0.6,0.2,0),
+               P('자유통일당',0.02,'#2E3192',0.3,0.9,0.7,0.8,{anti:0.4}), P('기본소득당',0.01,'#00D2C3',-0.7,-0.7,0.3,0),
+               P('사회민주당',0.01,'#F58400',-0.4,-0.6,0.2,0), P('새로운미래',0.01,'#45BCE8',-0.1,-0.1,0.2,0) ]},
+      uk: { label:'🇬🇧 영국형', moment:{gov:'노동당', govYears:2.2, g:1.0, u:4.8, i:3.0, approval:0.25},
+        desc:'2024 총선 — 노동당 33.7%로 411석(득표 대비 최대 의석 보너스). 개혁영국 14%·5석, 스코틀랜드·북아일랜드 정당',
+        seed:[ P('노동당',0.337,'#E4003B',-0.3,-0.3,0.05,0,{notIn:['북아일랜드'], orgs:[{name:'모멘텀', e:-0.8, g:-0.6, p:0.4, n:0, str:0.6, size:0.15}]}), P('보수당',0.237,'#0087DC',0.5,0.4,0.05,0.3,{notIn:['북아일랜드'], orgs:[{name:'유럽연구그룹(ERG)', e:0.7, g:0.7, p:0.4, n:0.7, str:0.5, size:0.2}]}),
+               P('개혁영국',0.143,'#12B6CF',0.4,0.8,0.7,0.7,{anti:0.35, notIn:['북아일랜드']}), P('자유민주당',0.122,'#FAA61A',0,-0.5,0.05,-0.1,{notIn:['북아일랜드']}),
+               P('녹색당',0.067,'#02A95B',-0.6,-0.8,0.2,-0.1,{notIn:['북아일랜드']}), P('스코틀랜드국민당',0.025,'#FDF38E',-0.3,-0.4,0.1,-0.8,{turf:['스코틀랜드']}),
+               P('신페인',0.007,'#326760',-0.5,-0.1,0.3,-0.9,{turf:['북아일랜드']}), P('웨일스당',0.007,'#005B54',-0.4,-0.4,0.1,-0.8,{turf:['웨일스']}),
+               P('민주연합당',0.006,'#D46A4C',0.2,0.8,0.3,0.7,{turf:['북아일랜드']}), P('얼라이언스당',0.004,'#F6CB2F',0,-0.4,0,-0.1,{turf:['북아일랜드']}) ]},
+      germany: { moment:{gov:'기독교민주연합', govYears:1.4, g:0.2, u:6.3, i:2.2, approval:0.30},
+        desc:'2025 총선 — 기민·기사련 28.5%, 독일을 위한 대안 20.8%(제2당), 사민당 16.4%. BSW(4.98%)·자민당 원외. 메르츠 대연정',
+        seed:[ P('기독교민주연합',0.226,'#000000',0.4,0.3,0,0.2), P('독일을 위한 대안',0.208,'#009EE0',0.4,0.8,0.7,0.8,{anti:0.45}),
+               P('독일사회민주당',0.164,'#E3000F',-0.4,-0.2,0.05,0), P('동맹90/녹색당',0.116,'#1AA037',-0.3,-0.8,0.05,-0.1),
+               P('좌파당',0.088,'#BE3075',-0.8,-0.6,0.3,-0.1), P('기독교사회연합',0.060,'#008AC5',0.4,0.5,0.1,0.3,{turf:['바이에른'], sister:'기독교민주연합', turfShare:0.37}),
+               P('자라 바겐크네히트 동맹',0.050,'#7D254F',-0.6,0.5,0.6,0.4), P('자유민주당',0.043,'#FFED00',0.8,-0.4,0.05,0),
+               P('자유유권자',0.015,'#F7A800',0.3,0.4,0.3,0.3), P('남슐레스비히유권자연합',0.002,'#003C8F',-0.1,-0.2,0,-0.8) ]},
+      denmark: { moment:{gov:'사회민주당', govYears:6.8, g:1.5, u:2.9, i:2.0, approval:0.35},
+        desc:'2026 조기 총선 — 사회민주당 21.9%(1903년 이후 최저), 적색 블록 84 대 청색 블록 77, 중도당이 캐스팅보트. 12개 정당 원내',
+        seed:[ P('사회민주당',0.219,'#A82721',-0.3,0.1,0.05,0.2), P('사회주의인민당',0.116,'#E07EA8',-0.6,-0.6,0.1,0),
+               P('자유당',0.101,'#254264',0.5,0.2,0,0.2), P('자유동맹',0.094,'#21C2D6',0.9,-0.2,0.2,0.1),
+               P('덴마크인민당',0.091,'#EAC73E',0,0.8,0.6,0.8,{anti:0.3}), P('중도당',0.077,'#842990',0.3,-0.1,0.05,0),
+               P('보수인민당',0.076,'#00583C',0.5,0.4,0,0.3), P('적녹연합',0.063,'#E5001A',-0.9,-0.6,0.3,-0.1),
+               P('덴마크민주당',0.058,'#0074BD',0.2,0.7,0.6,0.6), P('급진자유당',0.058,'#733280',0.1,-0.7,0,-0.2),
+               P('대안당',0.026,'#2B8738',-0.4,-0.8,0.2,-0.1), P('시민당',0.021,'#5B3C88',0.4,0.6,0.7,0.5) ]},
+      netherlands: { moment:{gov:'민주66', govYears:0.6, g:1.2, u:3.8, i:3.0, approval:0.45},
+        desc:'2025 조기 총선 — 민주66·자유당 각 26석(민주66이 2만9천 표 차 1위), 15개 정당 원내. 민주66·자민당·기민호소당 예턴 내각',
+        seed:[ P('민주66',0.169,'#00AE41',0.1,-0.7,0.05,-0.1), P('자유당',0.167,'#0E2B5C',0.2,0.8,0.8,0.8,{anti:0.4}),
+               P('자유민주국민당',0.147,'#FF7709',0.7,0.1,0,0.2), P('녹색좌파–노동당',0.133,'#C3002F',-0.6,-0.7,0.1,-0.1),
+               P('기독민주호소당',0.120,'#2EA349',0.3,0.4,0,0.2), P('올바른 답변 2021',0.060,'#242B57',0.6,0.6,0.4,0.6),
+               P('민주주의를 위한 포럼',0.047,'#841818',0.5,0.9,0.9,0.8,{anti:0.45}), P('농민시민운동',0.027,'#95C11F',0.3,0.6,0.5,0.4),
+               P('사회당',0.020,'#EE2E22',-0.8,0,0.4,0.1), P('덩크',0.020,'#00B7B2',-0.3,0.3,0.3,-0.5),
+               P('개혁정치당',0.020,'#E46E1B',0.4,1.0,0.1,0.3), P('동물당',0.020,'#006C2E',-0.5,-0.8,0.2,0),
+               P('기독교연합',0.020,'#00A7EB',0,0.6,0,0.1), P('50플러스',0.013,'#92278F',-0.2,0.2,0.4,0.1),
+               P('볼트',0.007,'#502379',0.1,-0.8,0.1,-0.4) ]},
+      hungary: { moment:{gov:'티서', govYears:0.4, g:0.8, u:4.5, i:4.0, approval:0.60},
+        desc:'2026 총선 — 티서 53.2%·141석(3분의 2)으로 오르반 16년 집권 종료. 피데스–기민당 52석, 우리조국운동 6석',
+        seed:[ P('티서',0.532,'#1A9FDB',0.2,0.2,0.3,0.4), P('피데스–기독민주국민당',0.386,'#FD8100',0,0.8,0.5,0.8,{anti:0.35}),
+               P('우리조국운동',0.056,'#688D1B',0.2,1.0,0.8,1.0,{anti:0.5}), P('민주연합',0.014,'#0067AA',-0.3,-0.5,0.1,0),
+               P('두꼬리개당',0.008,'#C0C0C0',-0.2,-0.6,0.8,0) ]},
+      japan: { moment:{gov:'자유민주당', govYears:13.8, g:0.8, u:2.5, i:2.5, approval:0.60},
+        desc:'2026 조기 총선 — 다카이치 자민당 316석(전후 최다), 자민–유신 연정. 입헌민주·공명 합당한 중도개혁연합 49석, 참정당·팀 미라이 약진',
+        seed:[ P('자유민주당',0.367,'#3CA324',0.4,0.6,0.1,0.6,{orgs:[{name:'아소파', e:0.4, g:0.6, p:0.1, n:0.6, str:0.7, size:0.25}]}), P('중도개혁연합',0.182,'#1C4FA1',-0.2,-0.2,0.05,0),
+               P('국민민주당',0.097,'#F8BB00',0.2,0.2,0.3,0.2), P('일본유신회',0.086,'#6FBA2C',0.6,0.3,0.4,0.3),
+               P('참정당',0.074,'#E95504',0.1,0.9,0.8,0.9,{anti:0.4}), P('팀 미라이',0.067,'#00B3E6',0.2,-0.5,0.3,0),
+               P('일본공산당',0.044,'#DB001C',-0.9,-0.5,0.3,0), P('레이와 신센구미',0.029,'#E4007F',-0.7,-0.4,0.8,0.1),
+               P('일본보수당',0.025,'#1B3A6B',0.4,1.0,0.6,1.0), P('감세일본·유코쿠연합',0.014,'#C08A00',0.1,0.6,0.8,0.5),
+               P('사회민주당',0.013,'#1E90FF',-0.6,-0.6,0.2,0) ]},
+      france: { moment:{gov:'르네상스', govYears:9, g:0.9, u:7.5, i:1.5, approval:0.22},
+        desc:'2024 조기 총선 후 3극 분할 의회 — 국민연합 1위, 신인민전선(굴복하지않는프랑스·사회당·녹색·공산), 앙상블(르네상스·민주운동·지평). 마크롱 재선 임기 말',
+        seed:[ P('국민연합',0.295,'#0D378A',0.2,0.8,0.6,0.8,{anti:0.55}), P('르네상스',0.150,'#FFD600',0.4,-0.2,0,0.1),
+               P('굴복하지않는프랑스',0.110,'#CC2443',-0.8,-0.4,0.7,0,{anti:0.4}), P('사회당',0.100,'#FF8080',-0.4,-0.4,0.05,0),
+               P('공화당',0.070,'#0066CC',0.6,0.5,0.05,0.4), P('녹색당',0.060,'#00C000',-0.4,-0.8,0.1,-0.1),
+               P('민주운동',0.045,'#FF9900',0.2,-0.1,0,0), P('지평',0.040,'#0001B8',0.5,0,0,0.1),
+               P('우파공화연합',0.040,'#1F3E8C',0.5,0.8,0.5,0.7,{anti:0.4}), P('공산당',0.025,'#DD0000',-0.8,0,0.3,0.1),
+               P('재정복',0.015,'#3E2C66',0.6,1.0,0.8,1.0,{anti:0.6}) ]},
+      italy: { moment:{gov:'이탈리아형제들', govYears:4, g:0.6, u:6.5, i:1.5, approval:0.42},
+        desc:'2022 총선 — 멜로니 우파 연합(이탈리아형제들·동맹·전진이탈리아·우리는 온건파). 제3극 악치오네·이탈리아 비바는 분리',
+        seed:[ P('이탈리아형제들',0.260,'#03386A',0.3,0.8,0.4,0.8), P('민주당',0.191,'#E2231A',-0.3,-0.4,0.05,0),
+               P('오성운동',0.154,'#FFEB3B',-0.4,0,0.7,0.2), P('동맹',0.088,'#008000',0.4,0.8,0.6,0.6),
+               P('전진이탈리아',0.081,'#0087DC',0.6,0.3,0.1,0.2), P('악치오네',0.045,'#003B7A',0.4,-0.3,0.05,0),
+               P('이탈리아 비바',0.033,'#D6007F',0.3,-0.3,0.1,0), P('이탈리아좌파',0.036,'#E67979',-0.6,-0.8,0.2,0),
+               P('플러스 유럽',0.028,'#FFD500',0.4,-0.8,0.05,-0.4), P('이탈렉시트',0.019,'#1A3C6E',0.3,0.8,0.9,0.8),
+               P('민중연합',0.014,'#B70000',-0.9,-0.4,0.5,0), P('우리는 온건파',0.009,'#2A7AB7',0.4,0.4,0,0.2),
+               P('남티롤인민당',0.004,'#000000',0.2,0.3,0,-0.9,{turf:['트렌티노주']}) ]},
+      spain: { moment:{gov:'사회노동당', govYears:8, g:2.5, u:11.0, i:2.5, approval:0.38},
+        desc:'2023 총선 — 국민당 1위에도 사회노동당이 수마르·지역 정당과 연정·지지로 재집권. 포데모스는 수마르에서 분리',
+        seed:[ P('국민당',0.331,'#0157A4',0.5,0.5,0.05,0.5), P('사회노동당',0.317,'#E1001A',-0.4,-0.3,0.1,-0.1),
+               P('복스',0.124,'#63BE21',0.4,0.9,0.7,0.9,{anti:0.45}), P('수마르',0.090,'#E51C55',-0.7,-0.7,0.3,-0.2),
+               P('포데모스',0.033,'#5F276B',-0.8,-0.6,0.6,-0.3), P('카탈루냐공화좌파',0.019,'#FFB232',-0.5,-0.4,0.2,-0.9),
+               P('함께 카탈루냐',0.016,'#00C3B2',0.3,0.1,0.3,-0.9), P('EH 빌두',0.014,'#A8C700',-0.7,-0.3,0.4,-0.9),
+               P('바스크국민당',0.011,'#008000',0.2,0.3,0,-0.8), P('갈리시아민족주의블록',0.006,'#76B3DD',-0.6,-0.4,0.3,-0.8),
+               P('카나리아연합',0.005,'#FFD700',0.2,0.2,0.1,-0.6), P('나바라인민연합',0.003,'#1F3C88',0.4,0.5,0,0.3),
+               P('파티는 끝났다',0.025,'#000000',0.6,0.8,0.9,0.6) ]},
+      swiss: { moment:{gov:'스위스국민당', govYears:20, approval:0.60},
+        desc:'2023 총선 — 스위스국민당 27.9% 1위. 연방각의는 주요 4당이 나눠 맡는 합의제(마법의 공식)',
+        seed:[ P('스위스국민당',0.279,'#3A8E23',0.5,0.8,0.5,0.8), P('사회민주당',0.183,'#E4161B',-0.6,-0.5,0.1,0),
+               P('자유민주당',0.143,'#0E52A0',0.7,0.1,0,0.1), P('중앙당',0.141,'#F18D00',0.2,0.3,0,0.1),
+               P('녹색당',0.098,'#84B414',-0.5,-0.8,0.1,-0.1), P('녹색자유당',0.076,'#A6CF42',0.4,-0.6,0,0),
+               P('복음인민당',0.019,'#FFD300',0,0.5,0,0), P('연방민주연합',0.012,'#7A1E8E',0.4,1.0,0.3,0.6),
+               P('티치노동맹',0.006,'#0B4B8F',0.3,0.7,0.7,0.2), P('제네바시민운동',0.006,'#FFE10A',0.1,0.6,0.7,0.3) ]},
+      turkey: { moment:{gov:'정의개발당', govYears:24, g:3.0, u:8.5, i:35, approval:0.42},
+        desc:'2023 총선 — 정의개발당 35.6%, 공화인민당 25.4%. 대통령제(에르도안), 봉쇄조항 7%',
+        seed:[ P('정의개발당',0.356,'#FFA500',0.2,0.8,0.4,0.8), P('공화인민당',0.254,'#E30A17',-0.3,-0.3,0.2,0.5),
+               P('민족주의행동당',0.101,'#C8102E',0.2,0.9,0.4,1.0), P('좋은당',0.097,'#1AA2E6',0.3,0.5,0.2,0.8),
+               P('인민평등민주당',0.088,'#8E44AD',-0.6,-0.5,0.4,-0.9), P('신복지당',0.028,'#EA1C24',-0.1,1.0,0.5,0.6),
+               P('승리당',0.022,'#3A3A3A',0.3,0.8,0.8,1.0), P('튀르키예노동자당',0.018,'#B71C1C',-0.9,-0.6,0.5,0) ]},
+      russia: { desc:'2021 두마 선거 — 통합러시아 49.8%. 원외 야블로코·러시아연금생활자당 등 포함',
+        seed:[ P('통합러시아',0.498,'#2862B3',0.2,0.7,0,0.8), P('공산당',0.189,'#CC1100',-0.8,0.5,0.4,0.7),
+               P('자유민주당',0.075,'#2A52BE',0.2,0.9,0.7,1.0), P('공정러시아',0.075,'#FFC003',-0.5,0.4,0.3,0.6),
+               P('신인민당',0.053,'#00C9C8',0.4,-0.2,0.3,0.3), P('러시아연금생활자당',0.025,'#00843D',-0.3,0.3,0.4,0.4),
+               P('야블로코',0.013,'#12A84C',0.2,-0.7,0.3,-0.2), P('러시아공산주의자',0.013,'#8B0000',-0.9,0.6,0.5,0.7) ]},
+      israel: { desc:'2022 총선 — 리쿠드 중심 우파·종교 정당 연정. 아랍계 정당(라암·하다시–타알), 원외 메레츠·발라드 포함',
+        seed:[ P('리쿠드',0.234,'#1F4E9C',0.5,0.7,0.4,0.7), P('예시아티드',0.178,'#00ADEF',0.2,-0.4,0.05,0.2),
+               P('종교시온주의당',0.108,'#C8A800',0.3,1.0,0.6,1.0,{anti:0.4}), P('국가통합',0.091,'#2A4F9C',0.2,0.1,0,0.4),
+               P('샤스',0.082,'#000000',-0.3,1.0,0.3,0.6), P('토라유대주의연합',0.059,'#1C3F94',-0.2,1.0,0.2,0.5),
+               P('이스라엘베이테이누',0.045,'#0F3B82',0.5,0.4,0.2,0.7), P('라암',0.041,'#17803D',-0.3,0.7,0.2,-0.9),
+               P('하다시–타알',0.038,'#BF1E2E',-0.7,-0.3,0.3,-0.9), P('노동당',0.037,'#E30613',-0.4,-0.5,0.05,0.1),
+               P('메레츠',0.032,'#00A651',-0.5,-0.8,0.1,0), P('발라드',0.029,'#7B2D26',-0.5,-0.2,0.5,-1.0) ]},
+    };
+  }
   _applyEstateProfile(i){
     const e=this.estate[i];
     if(e===0){        // 성직자: 교회 재산, 높은 교육, 강한 체제 옹호
@@ -20373,7 +20874,7 @@ const UI={
     // ── 반원 오버레이 토글 ──
     // 기본으로 켜 둔다 — 어느 당이 여당인지, 어떤 당인지, 좌우 어디인지는
     // 매번 켜야 하는 옵션이 아니라 처음부터 보여야 할 정보다.
-    this._parlOverlay={maj:false,label:true,gov:true,group:false};
+    this._parlOverlay={maj:false,label:true,gov:true,group:true,blocOrder:false};
     document.addEventListener('click',e=>{ const o=e.target.closest('.tchip[data-ov]'); if(!o)return;
       const k=o.dataset.ov; this._parlOverlay[k]=!this._parlOverlay[k];
       if(k==='fac') this._parlKey='';
@@ -21041,6 +21542,17 @@ Object.assign(UI, {
   // ── 의회 반원 ──
   _parlKey:'',
   // 계파 단위 균일색 — 정당색 유지, 계파 인덱스로 명도만 변주
+  // 반원에 그릴 연합·블록 — 전선 · 선거연합 · 정부 블록 · 자매당 · 위성정당(모정당과 한 몸)
+  _parlGroups(){
+    const s=this.sim, G=[], col=id=>{ const p=s.parties.find(x=>x.id===id); return p? p.color : '#888'; };
+    const lead=ids=>ids.map(id=>s.parties.find(x=>x.id===id)).filter(Boolean).sort((a,b)=>(b.seats||0)-(a.seats||0))[0];
+    for(const f of (s.fronts||[])){ const L=lead(f.members); G.push({name:f.name, kind:'전선', ids:f.members.slice(), color:L? L.color:'#888'}); }
+    for(const a of (s.alliances||[])){ const L=lead(a.members); G.push({name:a.name, kind:(a.depth||1)>=2? '공동명부' : a.govPact===false? '선거 협력' : '선거연합', ids:a.members.slice(), color:L? L.color:'#888'}); }
+    for(const g of (s.govBlocs||[])){ const L=lead(g.members); G.push({name:g.name, kind:'정부 블록', ids:g.members.slice(), color:L? L.color:'#888'}); }
+    const seen=new Set(); for(const p of s.parties){ if(p.sisterId!=null && !seen.has(p.id)){ seen.add(p.id); seen.add(p.sisterId); const L=lead([p.id,p.sisterId]); G.push({name:p.name+'·'+((s.parties.find(x=>x.id===p.sisterId)||{}).name||''), kind:'자매당', ids:[p.id,p.sisterId], color:L? L.color:'#888'}); }
+      if(p.satelliteOf!=null) G.push({name:p.name, kind:'위성정당', ids:[p.satelliteOf,p.id], color:col(p.satelliteOf)}); }
+    return G;
+  },
   renderParliament(){
     const s=this.sim, svg=$('#parl');
     // 연합·블록 기능 on/off에 따라 의회 뷰 칩 노출/숨김
@@ -21066,6 +21578,17 @@ Object.assign(UI, {
       const mid=Math.ceil(arr.length/2);
       return [...arr.slice(0,mid), copy, ...arr.slice(mid)];
     })();
+    // 연합·블록 보기 — 관계(전선·선거연합·정부 블록·자매당·위성정당)로 이어진 정당끼리 붙인다.
+    // 덩어리끼리는 의석 가중 평균 좌우 순, 덩어리 안에서는 좌우 순 — 배경 부채꼴이 이어진 덩어리로 그려지게
+    // 블록끼리 모으기(칩)를 켰을 때만 — 끄면 좌우 순서 그대로 두고 배경은 떨어진 덩어리로 그린다
+    if(this._parlOverlay && this._parlOverlay.group && this._parlOverlay.blocOrder && ps.length>2){
+      const G=this._parlGroups(), par=new Map(ps.map(p=>[p.id,p.id])), find=x=>{ while(par.get(x)!==x) x=par.get(x); return x; };
+      for(const g of G){ const ids=g.ids.filter(id=>par.has(id)); for(let k=1;k<ids.length;k++) par.set(find(ids[k]), find(ids[0])); }
+      const pos0=new Map(ps.map((p,k)=>[p.id,k])), cl=new Map();
+      for(const p of ps){ const r0=find(p.id); if(!cl.has(r0)) cl.set(r0,[]); cl.get(r0).push(p); }
+      const order=[...cl.values()].map(arr=>({arr, m:arr.reduce((a,p)=>a+pos0.get(p.id)*(p.seats||1),0)/arr.reduce((a,p)=>a+(p.seats||1),0)})).sort((a,b)=>a.m-b.m);
+      ps.splice(0, ps.length, ...order.flatMap(o=>o.arr.sort((a,b)=>pos0.get(a.id)-pos0.get(b.id))));
+    }
     const facOn = !!(this._parlOverlay&&this._parlOverlay.fac) && s.mpOn && s.mps && s.mps.length;
     const key=s.elections.length+'|'+(facOn?'F':'')+ps.map(p=>p.id+':'+p.seats+':'+p.color).join(',');
     const stale=key!==this._parlKey;
@@ -21175,8 +21698,9 @@ Object.assign(UI, {
     // ── 반원 오버레이 (매번 갱신) ──
     { let old=svg.querySelector('#parlOverlay'); if(old)old.remove(); }
     const ov=this._parlOverlay||(this._parlOverlay={});
-    const oM=ov.maj, oL=ov.label, oG=ov.gov, oGr=ov.group;
-    if(oM||oL||oG||oGr){
+    { let ob=svg.querySelector('#parlBlocBg'); if(ob) ob.remove(); }
+    const oM=false, oL=ov.label, oG=ov.gov, oGr=ov.group, oO=false;   // 과반선·조직 계파 점은 뺐다(조직은 정당 카드의 계파 목록에)
+    if(oL||oG||oGr||oO){
       const NS='http://www.w3.org/2000/svg';
       const g=document.createElementNS(NS,'g'); g.setAttribute('id','parlOverlay');
       const mk=(tag,attrs)=>{ const e=document.createElementNS(NS,tag); for(const k in attrs)e.setAttribute(k,attrs[k]); return e; };
@@ -21220,20 +21744,37 @@ Object.assign(UI, {
         const rr=rOut+9;
         for(const r of runs) drawArc(r.from, r.to, rr, '#5ae0b4', 3, 0.9);
       }
-      // 연합·블록 묶음
+      // 연합·블록 — 좌석 뒤의 반투명 부채꼴(여야의 호와 겹치지 않게 배경으로). 누르면 이름·의석
       if(oGr){
-        const groups=[];
-        if(this.parlView==='bloc' && s.blocsOn){ for(const b of s.blocs) groups.push({ids:new Set(b.parties),color:b.color}); }
-        else { for(const a of s.alliances) groups.push({ids:new Set(a.members),color:a.color}); }
-        const rr=rOut+ (oG?16:9);
-        for(const grp of groups){
-          let runs=[], cur=null;
-          for(const sg of segs){
-            if(grp.ids.has(sg.p.id)){ if(cur && cur.to===sg.from) cur.to=sg.to; else { cur={from:sg.from,to:sg.to}; runs.push(cur);} }
-            else cur=null;
-          }
-          for(const r of runs) drawArc(r.from, r.to, rr, grp.color, 2.5, 0.85);
-        }
+        const bg=document.createElementNS(NS,'g'); bg.setAttribute('id','parlBlocBg');
+        const step=totalDots>1? Math.PI/(totalDots-1) : 0.1, rI=Math.max(4,rIn-dot*1.8), rO=rOut+dot*1.8;
+        const P2=(a,rr)=>`${(cx+Math.cos(a)*rr).toFixed(1)} ${(cy-Math.sin(a)*rr).toFixed(1)}`;
+        for(const grp of this._parlGroups()){
+          const ids=new Set(grp.ids); let runs=[], cur=null;
+          for(const sg of segs){ if(ids.has(sg.p.id)){ if(cur && cur.to===sg.from) cur.to=sg.to; else { cur={from:sg.from,to:sg.to,n:0}; runs.push(cur);} cur.n+=sg.p.seats; } else cur=null; }
+          for(const rn of runs){ if(rn.to-rn.from<2) continue;
+            const a0=Math.min(Math.PI, angAt(rn.from)+step*0.5), a1=Math.max(0, angAt(rn.to-1)-step*0.5);
+            const path=mk('path',{d:`M ${P2(a0,rO)} A ${rO} ${rO} 0 0 1 ${P2(a1,rO)} L ${P2(a1,rI)} A ${rI} ${rI} 0 0 0 ${P2(a0,rI)} Z`,
+              fill:grp.color, 'fill-opacity':grp.kind==='정부 블록'? 0.22 : 0.30, stroke:grp.color, 'stroke-opacity':0.55, 'stroke-width':0.9,
+              'stroke-dasharray': grp.kind==='정부 블록'? '3 2' : 'none'});
+            const tt=document.createElementNS(NS,'title'); tt.textContent=`${grp.name} (${grp.kind}) ${rn.n}석`; path.appendChild(tt); bg.appendChild(path); } }
+        svg.insertBefore(bg, svg.firstChild);
+      }
+      // 조직 계파 — 정당 좌석을 계파 비율대로 나눠, 조직도 50% 이상 계파의 좌석에 작은 흰 점
+      if(oO && s._facOrgOf){
+        for(const sg of segs){ const P=s.parties.find(x=>x.id===sg.p.id); if(!P || !P.factions || !P.factions.length) continue;
+          // 점 색 — 좌석(정당) 색과 비슷한 톤: 어두운 색은 밝게, 밝은 색은 어둡게
+          const dotCol=(()=>{ let h=String(P.color||'#888').replace('#',''); if(h.length===3) h=h.split('').map(x=>x+x).join(''); const v=[0,2,4].map(i=>parseInt(h.substr(i,2),16));
+            const L=(0.299*v[0]+0.587*v[1]+0.114*v[2])/255, k2=L>0.6? -0.45 : 0.5;
+            return '#'+v.map(x=>Math.round(k2>0? x+(255-x)*k2 : x*(1+k2)).toString(16).padStart(2,'0')).join(''); })();
+          const fs=P.factions.slice().sort((a,b)=>(a.lr||0)-(b.lr||0)), tot=fs.reduce((a,f)=>a+(f.share||0),0)||1; let k=sg.from;
+          for(const f of fs){ const n=Math.round((f.share||0)/tot*(sg.to-sg.from)); const org=s._facOrgOf(P,f), nm=s._namedOrgFor? s._namedOrgFor(P,f) : null;
+            // 실제 조직은 그 규모만큼만(DSA는 민주당의 12%), 자생적 조직은 계파 전체
+            const m= nm && nm.size!=null? Math.min(n, Math.round(nm.size*(sg.to-sg.from))) : n, k0=k+Math.floor((n-m)/2);
+            // 실제 조직은 조직도와 상관없이 표시
+            if(org>=0.5 || nm) for(let i=k0;i<Math.min(sg.to,k0+m);i++){ const q=pos[i]; if(!q) continue; const c=mk('circle',{cx:q.x.toFixed(1),cy:q.y.toFixed(1),r:(dot*0.38).toFixed(2),fill:dotCol,'fill-opacity':0.95});
+              const tt=document.createElementNS(NS,'title'); tt.textContent=`${P.name} · ${f.name}${nm? ' — '+nm.name : ''} (조직도 ${(org*100).toFixed(0)}%)`; c.appendChild(tt); g.appendChild(c); }
+            k+=n; } }
       }
       // 정당 라벨: 각 정당 구간 중앙 각도에, 반원 바깥에 이름+의석
       if(oL){
@@ -21241,7 +21782,7 @@ Object.assign(UI, {
         for(const sg of segs){
           if(sg.p.seats < LS2*0.03) continue;
           const a=angAt2((sg.from+sg.to)/2);
-          const rr=rOut+ ((oG||oGr)?24:11);
+          const rr=rOut+ (oG?18:11);
           const lx=cx+Math.cos(a)*rr, ly=cy-Math.sin(a)*rr;
           const anchor = a>Math.PI*0.62?'end': a<Math.PI*0.38?'start':'middle';
           const nm=_sn(sg.p.name,5);
@@ -24370,7 +24911,7 @@ Object.assign(UI, {
           const typeCol={est:'#54e0ff',rad:'#ff5a7a',ref:'#9dff5a',pers:'#ffb24d'};
           const segs=p.factions.map(f=>`<div title="${f.name} ${(f.share*100).toFixed(0)}% (${{est:'주류',rad:'강경',ref:'개혁',pers:'인물'}[f.type]||''})"
             style="flex:${f.share};background:${typeCol[f.type]||'#888'};${f.dom?'box-shadow:inset 0 0 0 1.5px rgba(255,255,255,0.5)':''}"></div>`).join('');
-          const labels=p.factions.map(f=>`<span style="color:${typeCol[f.type]||'#888'}">${f.dom?'●':'○'}${f.name} ${(f.share*100).toFixed(0)}%</span>`).join('  ');
+          const labels=p.factions.map(f=>{ const og=this.sim._facOrgOf? this.sim._facOrgOf(p,f) : 0, on=this.sim._namedOrgFor? this.sim._namedOrgFor(p,f) : null; return `<span style="color:${typeCol[f.type]||'#888'}" title="조직도 ${(og*100).toFixed(0)}%">${f.dom?'●':'○'}${f.name}${on? ' — '+on.name : ''} ${(f.share*100).toFixed(0)}%${og>=0.5?' ◆':''}</span>`; }).join('  ');
           let nomHtml='';
           if(p.nominees){
             const filled=p.nominees.map((n,r)=>n?{r,n}:null).filter(Boolean).slice(0,6);
@@ -26272,6 +26813,16 @@ Object.assign(UI, {
   // 지역구가 농촌부터 하나씩 개표되고, 예측 바늘은 '개표된 곳만 보고' 남은 곳을 추정한다.
   // 건너뛰기를 누르거나 개표가 끝나면 기존 결과 팝업으로 넘어간다.
   // 비례제 개표 — 지역이 하나씩 개표되고 전국 득표율·예상 의석이 수렴한다
+  // 연합·블록 의석 — 명부 단위와 정당 단위를 함께
+  _groupsHTML(rec){
+    const G=rec.groups||[]; if(!G.length) return '';
+    const s=this.sim, nm=id=>{ const r=(rec.results||[]).find(x=>x.id===id); const p=s.parties.find(x=>x.id===id); return (r&&r.name)||(p&&p.name)||'?'; };
+    const T=rec.total||1;
+    const rows=G.map(g=>{ const tot=g.members.reduce((a,m)=>a+m.seats,0);
+      const parts=g.members.filter(m=>m.seats>0).sort((a,b)=>b.seats-a.seats).map(m=>`${this.pdot(m.id)}${nm(m.id)} ${m.seats}`).join(' + ');
+      return `<div style="margin:3px 0"><b>${g.name}</b> <span class="mut10">${g.kind}</span> <b>${tot}석</b> <span class="mut10">(${(tot/T*100).toFixed(0)}%)</span> = ${parts}</div>`; }).join('');
+    return `<div class="sect2">연합·블록 의석</div>${rows}`;
+  },
   _openCountPR(rec, pg){
     const s=this.sim;
     const regs=s.countOrderRegions(rec);
@@ -26992,7 +27543,7 @@ Object.assign(UI, {
     }).join('');
     const govPs=rec.gov.map(id=>s.parties.find(p=>p.id===id)).filter(Boolean);
     { let fb=$('#elFlow'); if(!fb){ fb=document.createElement('div'); fb.id='elFlow'; $('#elGov').after(fb); }
-      fb.innerHTML=this._fcVsResultHTML(rec) + this._swingHTML(rec) + this._bellHTML(rec) + this._seatFlowHTML(rec) + this._elecStackHTML(rec);
+      fb.innerHTML=this._groupsHTML(rec) + this._fcVsResultHTML(rec) + this._swingHTML(rec) + this._bellHTML(rec) + this._seatFlowHTML(rec) + this._elecStackHTML(rec);
       this._foldSections(fb, t=>/^스윙 미터|^선거 전 예측/.test(t)); }
     const presForm = s.govForm==='PRES';
     if(presForm){
