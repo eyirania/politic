@@ -3382,7 +3382,7 @@ class Sim {
     {fn:'stepSupport'},
     {fn:'_reconcileSeatKinds'},
     {fn:'_sysTurf'},
-    {fn:'_sysGovBlocs', every:12, save:['govBlocs']},
+    {fn:'_sysGovBlocs', every:12, save:['govBlocs','concordance']},
     {fn:'_sysSatellites', every:1},
     {fn:'_sysFactionOrg', every:12}, {fn:'stepDerived'}, {fn:'stepReferendum'},
     {fn:'_sysEnsureKing'},
@@ -3392,6 +3392,7 @@ class Sim {
     {fn:'stepPostmaterial'}, {fn:'stepPartyBan', flag:'partyBanOn'}, {fn:'stepOpinion'}, {fn:'stepAmendPhase'},
     {fn:'stepBusinessCycle'}, {fn:'stepDebtEffects'}, {fn:'stepImpeachment'},
     {fn:'_sysBlocIntegrity', every:3},
+    {fn:'_sysConcordance'},   // 합의제 — 매 틱 끝에 구성을 다시 적용
     {fn:'stepMedia', flag:'mediaOn'}, {fn:'stepDirectAction'}, {fn:'stepPoliticianLives', flag:'lifeOn'}, {fn:'stepAsymFederal'},
     {fn:'stepPartyOrg'}, {fn:'stepSects', flag:'sectOn'}, {fn:'stepFeuds', flag:'feudOn'}, {fn:'stepDominance'},
     {fn:'stepJudicialReview', flag:'reviewOn'}, {fn:'stepIntelligence', flag:'intelOn', save:['intel']}, {fn:'stepStats', flag:'statsOn', save:['stats']},
@@ -3782,7 +3783,7 @@ class Sim {
         const disc = p.discipline!=null? p.discipline : 0.5;
         const dGate = 0.95 + disc*0.75;
         const rebel=facs.find(f=>!f.dom && f.distC>dGate && f.share>0.18 && (f.rad>0.34 || f.distC>dGate+0.55));
-        const base=0.055*(this.factionTension??1)*(1.4-(p.discipline??0.5));
+        const base=(this.tune.splitBase??0.055)*(this.factionTension??1)*(1.4-(p.discipline??0.5));
         const xm=this.exitMul? this.exitMul(p) : 1;
         // 분당은 새 당을 만드는 일이라 진입 관문을 거친다. 목소리(아래)는 거치지 않는다.
         if(rebel && rnd()<base*xm*(1+0.8*this._facOrgOf(p, rebel)) && this.canCreateParty()){   // 조직된 계파는 이탈 비용이 낮다
@@ -4669,6 +4670,9 @@ class Sim {
   _challengerEntry(){
     // 제도화 — 창당 1년이 지나 의석을 가진 도전 정당은 반짝 딱지를 뗀다(돌풍이 보통 속도로 식는다).
     // 지지자 일부가 그 당에 정당일체감을 갖기 시작한다(독일 대안처럼 자리 잡는 경로).
+    // 비례 전용 졸업 — 자리 잡고(반짝 딱지 뗌) 지지가 10%를 넘은 비례 전용 정당은 지역구 후보도 낸다(위성정당은 예외)
+    for(const q of this.parties){ if(!q.listOnly || q.satellite || q.flash || q.id<0 || (q.support||0)<0.10) continue;
+      q.listOnly=false; this.pushNews(2,'norm',Sim._josa(`<b>${q.name}</b>, 지역구 후보도 낸다 — 비례 전용에서 전국 정당으로`)); }
     for(const q of this.parties){ if(!q.flash || q.id<0 || !(q.seats>0) || this.year()-(q.founded||0)<1) continue;
       q.flash=false; const RQ=this.rs('entry');
       for(let i=0;i<N;i++) if(this.party[i]===q.id && this.pidParty && (this.pidParty[i]<0 || (this.pid[i]||0)<0.2) && RQ.rnd()<0.35){ this.pidParty[i]=q.id; this.pid[i]=0.3; }
@@ -10166,6 +10170,17 @@ class Sim {
       votes=this.applyPanachage(votes, sys);
     const P=sys.prop;
     if(seats<=0) return new Map();
+    // 1위 보너스 의석(그리스 2023) — 1위가 min 이상이면 base석 + (min을 넘는 per마다 1석), 최대 max.
+    // 나머지(정원 − 보너스)는 평소대로 비례 배분하고 1위에 보너스를 더한다. con.bonus={min,base,per,max}
+    const BN=this.con.bonus;
+    if(BN && !this._inBonus && sys.tier && sys.tier.mode==='proportional'){
+      const tot=cast||[...votes.values()].reduce((a,b)=>a+b,0); let top=null, tv=-1;
+      for(const [id,v] of votes) if(id>=0 && v>tv){ tv=v; top=id; }
+      const sh=tv/Math.max(1,tot), b= sh>=BN.min? Math.min(BN.max, BN.base+Math.floor((sh-BN.min)/BN.per+1e-9)) : 0;
+      this._lastBonus= b>0? {id:top, seats:b, share:sh} : null;
+      if(b>0 && b<seats){ this._inBonus=true; let m; try{ m=this._propAlloc(votes, seats-b, sys, cast); } finally{ this._inBonus=false; }
+        m.set(top,(m.get(top)||0)+b); return m; }
+    }
     if(P.scope==='national'){
       // 연합 명부 결합이 켜져 있고 헤어식이면 기존 정교한 배분기를 쓴다
       if(P.apparentement!==false && P.formula==='hare' && this.alliances.length)
@@ -14918,7 +14933,7 @@ class Sim {
   // ── 의회 해산 (비상대권 보유자) ──
   // 예전엔 정부 모듈의 dissolveParliament와 이름이 같아 빌드 순서상 이 함수가 통째로 덮여 있었다.
   powerDissolve(){
-    const E=this.emergency; if(!E) return;
+    const E=this.emergency; if(!E || this.concordance) return;   // 합의제엔 해산이 없다
     const who=this.emergencyHolder('dissolve');
     E.dissolved++;
     this.pushNews(4,'sev2',
@@ -15419,6 +15434,12 @@ class Sim {
     }
   }
 
+  // 합의제(스위스) — 선거와 선거 사이의 연정 붕괴·재편·블록 무결성이 정부를 흔들지 않게, 의석 10% 이상 주요 정당(최대 4당)으로 되돌린다
+  _sysConcordance(){ if(!this.concordance || !this.elections.length) return;
+    const T=Math.max(1,this.totalSeats||this.con.lowerSeats||1);
+    const big=this.parties.filter(p=>p.id>=0 && (p.seats||0)>=0.10*T).sort((a,b)=>(b.seats||0)-(a.seats||0)).slice(0,4);
+    const want=(big.length? big : this.parties.filter(p=>p.id>=0).sort((a,b)=>(b.seats||0)-(a.seats||0)).slice(0,1)).map(p=>p.id);
+    if(want.join(',')!==this.govCoalition.join(',')) this.govCoalition=want; }
   // 정부 블록 정리 — 사라진 정당을 빼고, 둘 미만이면 해체
   _sysGovBlocs(){ if(!this.govBlocs||!this.govBlocs.length) return;
     const alive=new Set(this.parties.map(p=>p.id));
@@ -15880,14 +15901,18 @@ class Sim {
       }
       // ── 3) 계파 갈등: 공천에서 배제된 쪽의 불만 ──
       if(this.factionsOn && p.factions){
+        // 분당이 너무 잦았다(50년간 8~16번 — 전부 이 경로). 개방형 예비선거는 경선에서 겨룰 수 있어 불만이 쌓이지 않고
+        // (반란은 경선으로 흡수된다 — 티파티·트럼프), 불만은 옅어지며, 나가는 비용(제도·규율·진입 관문)을 따진다.
+        const disc=p.discipline!=null? p.discipline : 0.5, xm=this.exitMul? this.exitMul(p) : 1;
         for(const f of p.factions){
           let add=0;
-          if(mode==='top') add = f.dom? -0.15 : 0.30;        // 비주류 배제 → 반발
-          else if(mode==='member') add = f.dom? 0.10 : 0.05; // 당원 표심대로 → 갈등 적음
-          else if(mode==='open') add = 0.18;                 // 당원 소외 → 전반적 불만
-          f.griev = clamp((f.griev||0) + add, 0, 2);
-          // 임계 초과 → 탈당·분당
-          if(f.griev>1.1 && !f.dom && rnd()<0.35){
+          if(mode==='top') add = f.dom? -0.10 : 0.20;        // 비주류 배제 → 반발(옅어짐과 맞물려 수렴값 1.33 — 계속 밀리면 20여 년 뒤 문턱)
+          else if(mode==='member') add = f.dom? 0 : 0.03;    // 당원 표심대로 → 갈등 적음
+          else if(mode==='open') add = 0;                    // 경선에서 직접 겨룬다 → 불만이 쌓이지 않는다
+          f.griev = clamp((f.griev||0)*0.85 + add, 0, 2);    // 공천마다 15%씩 옅어진다
+          // 임계 초과 → 탈당·분당. 규모가 있어야 하고, 나가는 비용(소선거구는 크다)·규율·조직·진입 관문을 따진다
+          const pSplit=0.25*(1.4-disc)*xm*(1+0.8*(this._facOrgOf? this._facOrgOf(p,f) : 0));
+          if(f.griev>1.1 && !f.dom && (f.share||0)>0.15 && rnd()<pSplit && this.canCreateParty()){
             this.pushNews(3,'sev2',`<b>${p.name}</b> 공천 파동 — <b>${f.name}</b>, 낙천 반발해 집단 탈당`);
             this.chron(`${p.name} 공천 파동: ${f.name} 탈당`);
             f.griev=0;
@@ -16966,6 +16991,13 @@ class Sim {
         this.cohabitation = pres && !this.govCoalition.includes(pres.id);
         this.gridlock=false;
         if(this.cohabitation) this.pushNews(2,'sev2',`<b>동거정부</b> — 대통령(${pres.name})과 총리(${lead.name}) 소속이 다르다`);
+      } else if(this.con.concordance || this.concordance){
+        // 합의제 정부(스위스 마법의 공식) — 선거 결과와 상관없이 의석 10% 이상 주요 정당이 의석 비례로 내각을 나눠 맡는다.
+        // 사실상 야당이 없어 책임이 흩어진다(회고 투표가 약하다). 최대 4당
+        const big=ranked.filter(p=>p.id>=0 && (p.seats||0)>=0.10*T).slice(0,4);
+        this.govCoalition=(big.length? big : ranked.filter(p=>p.id>=0).slice(0,1)).map(p=>p.id);
+        lead=this.parties.find(p=>p.id===this.govCoalition[0]); seats=this.govCoalition.reduce((a,id)=>a+((this.parties.find(p=>p.id===id)||{}).seats||0),0);
+        this.pushNews(1,'norm',`<b>연방각의</b> — 합의제 정부: ${big.map(p=>p.name).join(' · ')}`);
       } else {
         // 내각제·입헌군주·선출군주: 의회 다수 연정
         if(F==='MONARCH' && this.monarch){ const mp=ranked.find(p=>p.id===this.monarch.pid); if(mp && mp.seats>=ranked[0].seats*0.8) lead=mp; }
@@ -18003,6 +18035,7 @@ class Sim {
     const f=this.govForm;
     if(f==='PRES') return false;        // 대통령제 — 임기 고정, 해산 불가
     if(f==='MONARCH') return false;     // 선출군주 — 임기 고정
+    if(this.concordance) return false;  // 합의제(스위스) — 의회는 임기 고정, 해산할 총리가 없다
     return true;                        // 내각제·이원집정부·입헌군주·전제군주
   }
   dissolveParliament(byPlayer){
@@ -18788,6 +18821,8 @@ class Sim {
     // 체제 유형·민주지수도 초기 조건이다 — 예전엔 빠져 있어 권위주의 프리셋이 자유민주주의로 시작했다
     this._presetKey=key; this._presetAt=this.tick;   // 공유 URL로 같은 세계를 재현하려고 기록(적용 시점 포함)
     if(P.names){ const w={generic:0,kr:0,jp:0,de:0,fr:0,latin:0,anglo:0,intl:0}; Object.assign(w,P.names); for(const k in w) w[k]=Math.max(0.01,w[k]); this.nameStyle=this._normW(w); this._nameBase=Object.assign({},this.nameStyle); }   // 당명 문화권(우세 + 섞임)
+    // 합의제 정부(스위스) — 헌법 칸이 아니라 나라 속성으로 둔다(개헌이 헌법 객체를 새로 만들며 모르는 칸을 버린다)
+    this.concordance=!!((P.con&&P.con.concordance) || P.concordance);
     if(P.regime) this.regime=P.regime;
     // 민주지수는 언론 자유·안정·신뢰·선거 공정성에서 매번 계산된다 — 지수가 아니라 그 재료를 넣어야 유지된다
     if(P.media!=null) this.S.mediaFreedom=P.media;
@@ -19201,8 +19236,8 @@ class Sim {
                P('에콜로',0.030,'#00A35C',-0.4,-0.8,0.05,0.1,{turf:['브뤼셀','에노','리에주','왈롱브라반트','나뮈르','뤽상부르']}), P('데피',0.012,'#E2007A',0.2,-0.3,0,0.4,{turf:['브뤼셀','에노','리에주','왈롱브라반트','나뮈르','뤽상부르']}) ]},
       greece: {label:'🇬🇷 그리스형', names:{generic:0.5, intl:0.2, latin:0.3}, structU:5.0, form:'PARL', regions:R('greece',['아티키','중앙마케도니아','테살리아','서그리스','크레타','동마케도니아·트라키','중앙그리스','펠로폰네소스','에피루스','서마케도니아','남에게해','북에게해']),
         moment:{gov:'신민주주의당', govYears:7, approval:0.30},
-        con:{fundLaw:'public', method:'PR', lowerSeats:300, threshold:3, prScope:'regional', prMethod:'hare', term:4, senate:'NONE'},
-        desc:'2023년 6월 총선 — 신민주주의당 40.6% 단독 과반(실제론 1위 보너스 의석제, 모델은 근사). 시리자 붕괴, 극우 군소정당 다수 원내',
+        con:{fundLaw:'public', method:'PR', lowerSeats:300, threshold:3, prScope:'regional', prMethod:'hare', term:4, senate:'NONE', bonus:{min:0.25, base:20, per:0.005, max:50}},
+        desc:'2023년 6월 총선 — 신민주주의당 40.6%로 158석 단독 과반(1위 보너스: 25%면 20석, 0.5%마다 +1석, 최대 50석). 시리자 붕괴, 극우 군소정당 다수 원내',
         seed:[ P('신민주주의당',0.406,'#0060AE',0.5,0.4,0,0.4), P('시리자',0.178,'#EF4B6C',-0.6,-0.4,0.2,0.1),
                P('파속',0.118,'#2DB34A',-0.2,-0.2,0.05,0.2), P('공산당',0.077,'#E2001A',-1.0,0.2,0.5,0.3),
                P('스파르타인',0.046,'#1E3A8A',0.3,1.0,0.8,1.0,{anti:0.5}), P('그리스 해법',0.044,'#3A6FB0',0.3,0.9,0.7,0.9),
@@ -19371,7 +19406,7 @@ class Sim {
                P('바스크국민당',0.011,'#008000',0.2,0.3,0,-0.8), P('갈리시아민족주의블록',0.006,'#76B3DD',-0.6,-0.4,0.3,-0.8),
                P('카나리아연합',0.005,'#FFD700',0.2,0.2,0.1,-0.6), P('나바라인민연합',0.003,'#1F3C88',0.4,0.5,0,0.3),
                P('파티는 끝났다',0.025,'#000000',0.6,0.8,0.9,0.6) ]},
-      swiss: { moment:{gov:'스위스국민당', govYears:20, approval:0.60},
+      swiss: { moment:{gov:'스위스국민당', govYears:20, approval:0.60}, con:{concordance:true},
         desc:'2023 총선 — 스위스국민당 27.9% 1위. 연방각의는 주요 4당이 나눠 맡는 합의제(마법의 공식)',
         seed:[ P('스위스국민당',0.279,'#3A8E23',0.5,0.8,0.5,0.8), P('사회민주당',0.183,'#E4161B',-0.6,-0.5,0.1,0),
                P('자유민주당',0.143,'#0E52A0',0.7,0.1,0,0.1), P('중앙당',0.141,'#F18D00',0.2,0.3,0,0.1),
