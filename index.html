@@ -3370,7 +3370,8 @@ class Sim {
     {fn:'_sysPolicyLog', every:12, save:['policyLog','_richCent']},
     {fn:'_sysNameCulture', every:12, save:['nameStyle','_nameBase']},
     {fn:'stepParties', every:6},
-    {fn:'_sysValenceDecay', every:12},
+    {fn:'_sysValenceDecay', every:12, save:['_presPact']},
+    {fn:'_sysGovRep', every:12, save:['govRep','_repKey','_repLead']},
     {fn:'_challengerEntry', every:3, save:['_lastChallenger','_entryPressure','_lastNewAxisTick']},
     {fn:'stepSupport'},
     {fn:'_reconcileSeatKinds'}, {fn:'stepDerived'}, {fn:'stepReferendum'},
@@ -5853,7 +5854,9 @@ class Sim {
     let threat=0;
     for(const p of this.parties){
       if(p.id<0 || (p.support||0)<0.03) continue;
-      const a=this.antiSystemScore(p);
+      // 반체제 점수 + 유권자 반감 — 광범위한 거부(anti: '절대 안 찍는다')를 받는 정당도 격리 대상이 된다.
+      // 공화 전선(프랑스 국민연합)이 이 경우다. 예전엔 반체제 점수만 봐서 국민연합이 르네상스와 연정을 꾸리곤 했다
+      const a=Math.max(this.antiSystemScore(p), (p.anti||0)>=0.45? 0.65 : 0);
       // 반체제성이 뚜렷하고 무시 못 할 크기면 격리 대상
       if(a>0.60 && (p.support||0)>0.05){
         targets.add(p.id);
@@ -7388,6 +7391,15 @@ class Sim {
     }
     return out;
   }
+  // 국정 지지 환산 — 평가 평균이 중립선이면 50%. 중립선 −0.17은 장기 분포(다섯 나라 40년, 평가 평균 −0.24)가
+  // 지지율 약 43%가 되게 맞춘 값이다(현실 민주국가 장기 평균 40~45%). 예전 −0.25에선 평균 51%였다
+  static get APPR_NEUTRAL(){ return -0.17; }
+  static apprOf(mid){ return clamp(0.50 + (mid-Sim.APPR_NEUTRAL)*1.15, 0.03, 0.97); }
+  static midOfAppr(a){ return (a-0.50)/1.15 + Sim.APPR_NEUTRAL; }
+  // 정부 평판 — 해마다 풀린다(반감기 약 4년). 정권이 바뀌면 stepRetrospective 쪽에서 0으로
+  _sysGovRep(){ if(this.govRep){ this.govRep*=0.85; if(Math.abs(this.govRep)<0.005) this.govRep=0; }
+    const key=(this.govCoalition||[]).slice().sort().join(','); if(this._repKey!==undefined && key!==this._repKey && this.govCoalition.length && !this.govCoalition.includes(this._repLead)) this.govRep=0;
+    this._repKey=key; this._repLead=this.govCoalition[0]; }
   // ════════ 지지율 3층 · 무당층 유형 ════════
   // 지금까지 support 하나로 "이 정당에 투표할 사람"만 표현했다.
   // 현실의 여론조사는 셋을 따로 묻고, 종종 어긋난다.
@@ -7417,7 +7429,7 @@ class Sim {
     // 대신 평균 평가를 지지율로 매핑한다 (경제·치안 성과가 직접 반영된 값).
     const mid = n? ev/n : 0;
     // 평가는 집권 마모 때문에 음수 편향이다. 중립선을 -0.25로 잡아 매핑한다.
-    this.govApproval = clamp(0.50 + (mid+0.25)*1.15, 0.03, 0.97);
+    this.govApproval = Sim.apprOf(mid);
     this.govEvalAvg  = n? ev/n : 0;
 
     // ── ③ 정책 동의 — 활성 쟁점별 찬반 ──
@@ -10217,6 +10229,9 @@ class Sim {
     const C=this.con, T=C.lowerSeats;
     const sys=this.readSystem();
     for(const p of this.parties){ p.prevSeats=p.seats||0; p.seats=0; p.dSeats=0; p.pSeats=0; }
+    // 지역 인물(무소속)의 재직 표시도 총선마다 지운다 — 당선자만 다시 켜진다. 지역구가 없는 제도(순수 비례)로 개헌되면
+    // 지역 인물 처리 단계를 건너뛰어, 옛 의회의 재직 표시가 남아 '의석 없는 무소속 재직'이 됐다
+    if(this.notables) for(const n of this.notables) n.seated=false;
     let R;
     try { R=this.runElectionPipeline(sys); }
     catch(e){ return false; }                    // 실패하면 기존 경로로 폴백
@@ -16379,7 +16394,7 @@ class Sim {
     // ── 대선 후보 단일화 ──
     // 결선이 없는 단순다수제에서 특히 강하게 작동한다. 이념이 가까운 두 후보가
     // 갈라지면 함께 지는 것을 알기 때문이다(1992·1997 한국, 2002 프랑스의 교훈).
-    this._presUnify=[];
+    this._presUnify=[]; this._presPact=null;    // 공동정부 약속은 대선마다 새로
     if(this.preCoordOn!==false && !concurrent){
       let arr=[...votes.entries()].sort((a,b)=>b[1]-a[1]);
       const noRunoff = !C.presRunoff;
@@ -16407,8 +16422,10 @@ class Sim {
         // 성사 확률 — 결선이 없을수록, 이념이 가까울수록, 이득이 클수록
         const p0 = clamp((noRunoff?0.34:0.10) + (1.35-best.d)*0.14 + clamp(best.gain*1.2,0,0.15) - 0.12, 0, 0.6);
         if(rnd() > p0) break;
-        // 지지가 낮은 쪽이 사퇴한다
-        const [keep, drop] = best.P && arr[best.a][1]>=arr[best.b][1] ? [best.a,best.b] : [best.b,best.a];
+        // 후보는 경쟁력으로 정한다 — 정당 지지 × 후보(당대표) 개인 매력. 작은 당이라도 후보가 더 매력적이면 그쪽이 나간다
+        // (2002 노무현–정몽준은 여론조사로 정했다). 예전엔 항상 지지가 높은 쪽이 남았다
+        const appeal=i=>{ const x=this.parties.find(q=>q.id===arr[i][0]); const ch=(x&&x.leader&&x.leader.charisma!=null)? x.leader.charisma : 0.5; return arr[i][1]*(0.75+0.5*ch); };
+        const [keep, drop] = appeal(best.a)>=appeal(best.b) ? [best.a,best.b] : [best.b,best.a];
         const K=this.parties.find(x=>x.id===arr[keep][0]);
         const D=this.parties.find(x=>x.id===arr[drop][0]);
         if(!K||!D) break;
@@ -16418,8 +16435,12 @@ class Sim {
         votes.delete(D.id);
         cast -= arr[drop][1]-moved;
         this._presUnify.push({ keep:K.name, drop:D.name, moved, color:K.color });
-        this.pushNews(3,'sev2',
-          `<b>대선 후보 단일화</b> — ${D.name}이 사퇴하고 ${K.name}을 지지한다`);
+        // 공동정부 약속 — 물러난 당은 당선되면 입각한다(1997 DJP: 김대중 당선 → 김종필 총리·공동정부).
+        // 내각 자리는 의석 비율로 나누므로, 물러난 당이 더 크면 내각 다수를 가져간다
+        this._presPact={pres:K.id, partner:D.id, tick:this.tick};
+        const smallerWins=(K.seats||0)<(D.seats||0);
+        this.pushNews(3,'sev2',Sim._josa(
+          `<b>대선 후보 단일화</b> — ${D.name}(이) 사퇴하고 ${K.name}(을) 지지한다 · 당선되면 공동정부${smallerWins? ' (의석이 많은 '+D.name+'(이) 내각 다수)' : ''}`));
         this.chron(`대선 단일화: ${D.name} → ${K.name}`);
         // 사퇴한 정당은 정체성 훼손으로 지지를 잃는다
         D.support=clamp((D.support||0)*0.94,0,1);
@@ -16553,7 +16574,7 @@ class Sim {
         scandals: (this.scandals||[]).filter(x=>!x.done).map(x=>({name:x.name, kind:x.kind, stage:x.stage})),
         // 당시 상황
         econ: this.S.gdpGrowth, unemp: this.S.unemployment,
-        approval: this.S.govApproval ?? null,
+        approval: this.govApproval ?? null,   // 예전엔 없는 필드(S.govApproval)를 읽어 늘 빈값이었다
         atWar: !!this.atWar,
       });
       if(this.presLog.length>40) this.presLog.pop();
@@ -16572,6 +16593,9 @@ class Sim {
       for(const bp of (this.blocOf? this.blocOf(win.id) : [win])){
         if(!this.govCoalition.includes(bp.id) && (bp.seats||0)>0) this.govCoalition.push(bp.id);
       }
+      // 단일화 약속 상대는 입각한다(공동정부) — 블록이 함께 들어온다
+      const pact=this._presPact; if(pact && pact.pres===win.id){ const pp=this.parties.find(q=>q.id===pact.partner);
+        if(pp) for(const bp of (this.blocOf? this.blocOf(pp.id) : [pp])) if(!this.govCoalition.includes(bp.id)) this.govCoalition.push(bp.id); }
       // 의회 과반이 안 되면 각외 협력을 구한다(분점정부)
       const T=this.totalSeats, maj=T*clamp(this.con.majority,0.3,0.7);
       if(this.govSeats<=maj){
@@ -16722,7 +16746,8 @@ class Sim {
     if(gallagher>14) this.pushNews(2,'sev2','득표한 만큼 의석을 얻지 못했다 — 사표 논란, <b>선거제 개혁</b> 요구 확산');
     this.detectMilestones(votes, cast);
     this._applyDuverger(votes, cast, T, gallagher);
-    const ranked=[...this.parties].filter(p=>p.seats>0).sort((a,b)=>b.seats-a.seats);
+    // 무소속(−2)은 정당이 아니라 연정에 들어갈 수 없다 — 예전엔 영입 후보에 섞여 '르네상스+무소속+녹색당' 같은 내각이 생겼다
+    const ranked=[...this.parties].filter(p=>p.id>=0 && p.seats>0).sort((a,b)=>b.seats-a.seats);
     const oldGov=this.govCoalition.slice();
     this.govCoalition=[];
     const maj=T*clamp(C.majority,0.3,0.7);
@@ -16761,9 +16786,20 @@ class Sim {
             if(mid===win.id || this.govCoalition.includes(mid)) continue;
             const mp=this.parties.find(x=>x.id===mid);
             if(mp && (mp.seats||0)>0){ this.govCoalition.push(mid); seats+=mp.seats; } } }
+          // 제1야당은 영입하지 않는다 — 연합 대통령제(브라질·칠레)에서도 대통령이 끌어들이는 건 자기 당보다 작은 군소 정당이다.
+          // 대통령 당과 견줄 만한 정당(의석 60% 이상)이나 원내 최대 야당(의석 25% 이상)은 다음 대선의 경쟁자라 입각하지 않는다.
+          // 예전엔 이념 거리만 봐서 한국 프리셋에서 거대 양당 대연정이 자주 생겼다
+          const T0=Math.max(1,this.totalSeats||ranked.reduce((a,x)=>a+(x.seats||0),0));
+          const rival=ranked.filter(x=>x.id!==win.id && x.id>=0).sort((a,b)=>(b.seats||0)-(a.seats||0))[0];
+          // 단일화 약속 상대(공동정부)는 크기와 상관없이 함께한다
+          const pact=this._presPact, partnerId= pact && pact.pres===win.id? pact.partner : null;
+          if(partnerId!=null){ const pp=this.parties.find(q=>q.id===partnerId);
+            if(pp) for(const bp of (this.blocOf? this.blocOf(pp.id) : [pp])) if(!this.govCoalition.includes(bp.id)){ this.govCoalition.push(bp.id); seats+=bp.seats||0; } }
+          const isRival=o=> o.id!==partnerId && ((o.seats||0)>=0.6*(win.seats||0) || (rival && o.id===rival.id && (o.seats||0)>=0.25*T0));
           for(const o of allies){ if(seats>maj)break;
             if(!this.canCoalesce(win.id,o.id)) continue;
             if(this.govCoalition.includes(o.id)) continue;
+            if(isRival(o)) continue;
             const dd=this.partyDist(win.cent,o)*this.cordonAllyBonus(win,o);
             if(dd<1.7 && rnd()<0.85-dd*0.35){
               // 연합·전선에 속한 정당은 통째로 들어온다 (부분 입각 금지)
@@ -17238,7 +17274,9 @@ class Sim {
     // ── 상대 평가: 절대 수준이 아니라 '기준선 대비 개선/악화' ──
     // 기준선은 유권자 기대치로, 실제 성과를 천천히 따라간다(기대 조정)
     if(!this._base) this._base={growth:S.gdpGrowth,unemp:S.unemployment,infl:S.inflation,crime:S.crime,stab:S.stability};
-    const B=this._base, aB=0.0012;   // 기대 조정은 매우 느리게(위기를 위기로 인식하도록)
+    // 기대 조정 — 유권자는 최근 몇 년과 비교한다(반감기 약 3년). 위기는 몇 년간 기대보다 나빠 위기로 느껴진다.
+    // 예전 반감기 48년은 첫 달 값에 기대가 묶여, 프리셋에선(시작 성장률 단위 오류와 겹쳐) 수십 년 내내 '실망'이었다
+    const B=this._base, aB=this.tune.retroAdapt??0.019;
     B.growth=lerp(B.growth,S.gdpGrowth,aB); B.unemp=lerp(B.unemp,S.unemployment,aB);
     B.infl=lerp(B.infl,S.inflation,aB); B.crime=lerp(B.crime,S.crime,aB); B.stab=lerp(B.stab,S.stability,aB);
     const perfGrowth = clamp((S.gdpGrowth-B.growth)/0.8, -1, 1);
@@ -17247,7 +17285,10 @@ class Sim {
     const perfCrime  = clamp((B.crime-S.crime)/12, -1, 1);
     const perfStab   = clamp((S.stability-B.stab)/18, -1, 1);
     // 책임 귀속(Powell & Whitten): 연립·분할정부일수록 책임이 흐려진다
-    let clarity = 1/Math.max(1, this.govCoalition.length);          // 연립 규모
+    // 연립 규모 — 의원내각제에선 책임이 연정 정당들에 나뉜다. 대통령제·이원집정부제에선 내각에 다른 당이 들어와도
+    // 책임은 주로 대통령의 당이 진다(Powell & Whitten의 명확성은 의원내각제 기준) — 연정 규모의 영향을 약하게
+    const nC=Math.max(1, this.govCoalition.length);
+    let clarity = (this.govForm==='PRES'||this.govForm==='SEMI')? 1/(1+0.25*(nC-1)) : 1/nC;
     if(this.gridlock) clarity*=0.7;                                  // 여소야대
     if(this.localGovOn && this.governors && this.governors.length){   // 지방권력 분열
       const cid=this.govCoalition[0];
@@ -17295,7 +17336,12 @@ class Sim {
         perf = clamp(perf, -1, 1);
       }
       // 손실 회피: 나빠진 건 즉시 체감하고 좋아진 건 뒤늦게 안다
-      const tgt = perf*clarity;
+      // 정부 평판 — 정부마다 쌓이고 서서히 풀린다(정권이 바뀌면 0). 프리셋은 심은 지지율과 평상시의 차이로 시작한다
+      perf = clamp(perf + (this.govRep||0), -1, 1);
+      // 책임이 흐릿하면(연정·여소야대) 평가는 '중립'(지지율 50%) 쪽으로 줄어든다. 예전엔 0 쪽으로 줄어,
+      // 0이 '꽤 좋음'(79%)이라 연정 국가(독일)의 지지율이 늘 70%대에 붙어 있었다
+      const NEU=Sim.APPR_NEUTRAL;
+      const tgt = NEU + (perf-NEU)*clarity;
       const rate = tgt < this.retroEval[i]? 0.16 : 0.05;
       this.retroEval[i] = clamp(lerp(this.retroEval[i], tgt, rate), -1, 1);
     }
@@ -18659,14 +18705,24 @@ class Sim {
   // 국가 프리셋의 초기 정당 시드를 실제 정당으로 구현(기존 정당은 모두 정리하고 시민들을 새 정당에 재배정)
   _seedMoment(M, made, adults, R){
     const S=this.S;
-    if(M.g!=null) S.gdpGrowth=M.g; if(M.u!=null) S.unemployment=M.u; if(M.i!=null) S.inflation=M.i;
+    if(M.g!=null) S.gdpGrowth=M.g/12;   /* 프리셋 성장률은 연율, 모델은 월간 성장률(경제 규모 ×(1+g/100) 매달) — 예전엔 그대로 넣어 연율 11%로 시작했다 */ if(M.u!=null) S.unemployment=M.u; if(M.i!=null) S.inflation=M.i;
     if(M.phase){ this.boomYears=0; this.bubble=0; this.crisisPhase=M.phase; this.crisisLeft=M.phase==='slump'? 24 : 18; }
     const gov= made.find(p=>p.name===M.gov) || made.slice().sort((a,b)=>b.support-a.support)[0];
     if(gov){ this.govCoalition=[gov.id]; this.govSince=-Math.round((M.govYears||0)*12); }   // 집권 기간 — 틱은 0부터라 음수로 거슬러 올라간다
+    // 대통령제·이원집정부제 — 여당 소속 대통령을 심는다. 집권 기간으로 지금 임기의 몇 년째인지(→ 다음 대선)와 재선 여부를 정한다.
+    // 예전엔 대통령 없이 시작해 첫 대선이 '공석'에서 치러졌다(프랑스: 3년째 대선에서 국민연합 당선 → 르네상스가 야당이 돼 지지 회복)
+    if(gov && (this.govForm==='PRES'||this.govForm==='SEMI') && !this.president){
+      const termY=Math.max(1, this.presInterval/12), yrs=Math.max(0, M.presYears ?? M.govYears ?? 0);
+      const inTerm=yrs % termY, served=Math.floor(yrs/termY)+1;
+      this.president={pid:gov.id, since:this.year()-Math.round(inTerm), terms:served, lid:gov.leader? gov.leader.lid : null, personTerms:served};
+      this.lastPresElection=-Math.round(inTerm*12);
+    }
+    // 정부 평판 — 심은 지지율이 평상시(약 45%)와 다른 만큼. 원인(실정)이 모델에 없어도 1~2년 만에 증발하지 않게, 서서히 풀린다
+    if(M.approval!=null) this.govRep=clamp(Sim.midOfAppr(M.approval)-Sim.midOfAppr(0.45), -0.4, 0.4);
     if(M.approval!=null){ this.govApproval=M.approval;
       for(const i of adults){ const mine= gov && this.party[i]===gov.id;
         // 모델의 환산식(지지 = 0.5 + (평균 평가+0.25)×1.15)을 거꾸로 풀어 평균을 맞춘다 — 예전엔 30%를 심으면 41%가 됐다
-        const mid=(M.approval-0.5)/1.15-0.25, g=gov? (gov.support||0.3) : 0.3, off=mid-(g*0.35+(1-g)*-0.15);
+        const mid=Sim.midOfAppr(M.approval), g=gov? (gov.support||0.3) : 0.3, off=mid-(g*0.35+(1-g)*-0.15);
         this.retroEval[i]=clamp(off + (mine? 0.35 : -0.15) + (R.rnd()-0.5)*0.4, -1, 1); } }
   }
   _calibrateValence(made, tgt, adults){
@@ -23232,7 +23288,7 @@ Object.assign(UI, {
       <span style="min-width:60px;color:var(--tx3)">${label}</span>
       <div class="bar" style="height:6px;max-width:80px"><div style="width:${clamp(val/max,0,1)*100}%;background:${col}"></div></div>
       <span class="mono3">${fmt}</span></div>`;
-    html+=bar('성장률', Math.max(0,S.gdpGrowth+2), S.gdpGrowth.toFixed(2)+'%', S.gdpGrowth<0?'#ff6262':'#5ae0b4', 6);
+    html+=bar('성장률(연율)', Math.max(0,S.gdpGrowth*12+2), (S.gdpGrowth*12).toFixed(1)+'%', S.gdpGrowth<0?'#ff6262':'#5ae0b4', 6);   // 모델은 월간 성장률 — 연율로 보여준다
     html+=bar('실업률', S.unemployment, S.unemployment.toFixed(1)+'%', S.unemployment>9?'#ff6262':S.unemployment>6?'#e8a33d':'#8c97ad', 20);
     html+=bar('물가', Math.abs(S.inflation), S.inflation.toFixed(1)+'%', Math.abs(S.inflation)>5?'#ff6262':'#8c97ad', 10);
     if(s.fiscal) html+=bar('국가부채', s.fiscal.debt, s.fiscal.debt.toFixed(2), s.fiscal.debt>1.0?'#ff6262':s.fiscal.debt>0.6?'#e8a33d':'#8c97ad', 2);
@@ -28790,7 +28846,7 @@ Object.assign(UI, {
       {k:'fiscal.taxRate', l:'세율', min:5, max:60, s:1, f:v=>(v/100), inv:v=>v*100, d:'실효 세율'},
       {k:'fiscal.debt',    l:'국가부채', min:0, max:300, s:5, f:v=>(v/100), inv:v=>v*100, d:'GDP 대비 부채'},
       {g:'경제 지표'},
-      {k:'S.gdpGrowth',   l:'GDP 성장률', min:-40, max:60, s:1, f:v=>(v/10), inv:v=>v*10, d:'분기 성장률'},
+      {k:'S.gdpGrowth',   l:'GDP 성장률', min:-40, max:60, s:1, f:v=>(v/10), inv:v=>v*10, d:'월간 성장률 — 연율은 ×12'},
       {k:'S.unemployment',l:'실업률', min:10, max:350, s:5, f:v=>(v/10), inv:v=>v*10, d:'%'},
       {k:'S.inflation',   l:'물가상승률', min:-30, max:400, s:5, f:v=>(v/10), inv:v=>v*10, d:'%'},
       {k:'S.inequality',  l:'불평등(지니)', min:15, max:80, s:1, f:v=>(v/100), inv:v=>v*100, d:'0.15~0.80'},
