@@ -14578,20 +14578,21 @@ class Sim {
       // 과밀할수록 살아남는 문턱이 올라간다
       // 결선제의 1차 투표는 진심 투표라, 의석이 없어도 1차 득표로 존재감·공적 보조금을 유지한다(콕스).
       // 그래서 의석 0인 정당의 소멸 문턱이 낮다 — 연합 상대로 남아 선거연합이 생길 수 있다.
-      const bar0 = (RUN? 0.06 : 0.11) + crowd*0.06;
-      const bar1 = 0.06 + crowd*0.05;
-      // 비례제에서는 share ≈ sup이라 '득표 대비 손해' 조건이 결코 걸리지 않는다.
-      // 절대 규모로도 판정해야 한다 — 20당 체제에서 3%는 주변 정당이다.
-      const tiny = sup < (0.045 + crowd*0.055);
+      // 해산은 지지가 바닥까지 무너졌을 때다 — 원외 정당은 1~5%로도 수십 년 버티고(독일 자유유권자·영국 녹색당의 원외 시절),
+      // 의석은 보조금·의원이라는 버팀목이다. 예전엔 의석 없으면 11% 미만, 있어도 4.5~10% 미만이면 실패라
+      // 한국 프리셋 10당이 10년 만에 3당이 됐다(조국혁신당 6%·개혁신당 5% 해산). 군소 정당을 줄이는 힘(뒤베르제)은
+      // 해산 규칙이 아니라 사표 방지 투표가 지지를 깎는 과정에 있다.
+      const bar0 = 0.015 + crowd*0.01;          // 의석 없는 정당 — 1.5%(정당이 많으면 2.5%) 미만
       const failing = (p.seats||0)===0
         ? (sup<bar0 && !regional)
-        : ((tiny || (share < sup*0.30 && sup<bar1)) && !regional);
+        : (sup<0.01 && !regional);               // 의석 있는 정당 — 1% 미만일 때만
       if(failing) p.lowStreak++;
       else p.lowStreak=Math.max(0, p.lowStreak-2);
 
       // 소멸 — 연속 실패가 쌓이면 해산한다.
       // 비례제에서는 군소정당이 살아남을 수 있으므로 문턱을 높인다.
-      const limit = Math.max(3, Math.round((propish? 7 : 4) - crowd*3));
+      // 오래된 정당일수록 버틴다 — 창당 8년마다 연속 실패 한도 +1(조직·당원·브랜드)
+      const limit = Math.max(3, Math.round((propish? 7 : 4) - crowd*3)) + Math.floor(Math.max(0, this.year()-(p.founded||this.year()))/8);
       if(p.satellite) continue;   // 위성정당은 선거 뒤 모정당에 흡수된다
       // 현직 대통령의 당은 자연 소멸하지 않는다 — 자원과 관심이 몰린다(강제 해산은 별도 경로)
       if(this.president && this.president.pid===p.id){ p.lowStreak=Math.min(p.lowStreak, limit-1); continue; }
