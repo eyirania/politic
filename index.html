@@ -3381,6 +3381,7 @@ class Sim {
     {fn:'_challengerEntry', every:3, save:['_lastChallenger','_entryPressure','_lastNewAxisTick']},
     {fn:'stepSupport'},
     {fn:'_reconcileSeatKinds'},
+    {fn:'_sysRegional', every:12, save:['_regIdent']},
     {fn:'_sysTurf'},
     {fn:'_sysGovBlocs', every:12, save:['govBlocs','concordance']},
     {fn:'_sysSatellites', every:1},
@@ -4168,8 +4169,11 @@ class Sim {
     if(!this.partyLock)
     for(let a=0;a<this.parties.length;a++)for(let b=a+1;b<this.parties.length;b++){
       const A=this.parties[a],B=this.parties[b];
+      // 위성정당은 선거 뒤 따로 흡수된다. 합당 확률은 같은 유권자를 놓고 다투는 정도(지역 겹침)에 비례 —
+      // 지역을 나눠 가진 두 당(기민·기사련)은 다투지 않으니 합칠 이유가 없다(금지가 아니라 결과)
+      if(A.satelliteOf!=null || B.satelliteOf!=null) continue;
       const T_=this.tune||{};
-      if(this.partyDist(A.cent,B)<(T_.mergeDist??0.5) && (A.support+B.support)<(T_.mergeMaxSupport??0.28) && rnd()<(T_.mergeRate??0.025)){
+      if(this.partyDist(A.cent,B)<(T_.mergeDist??0.5) && (A.support+B.support)<(T_.mergeMaxSupport??0.28) && rnd()<(T_.mergeRate??0.025)*this._overlap(A,B)){
         const big=A.support>=B.support?A:B, small=A.support>=B.support?B:A;
         this._moveSeats(small, big, small.seats||0);   // 의원직 승계
         this.pushNews(2,'norm',`<b>${small.name}</b>, <b>${big.name}</b>에 흡수 합당`);
@@ -4477,7 +4481,7 @@ class Sim {
       return f.members.length>=2;
     });
     const tmp={ id:-999, name:o.name||null, members:ms.map(p=>p.id),
-      leader:o.leader||null, color:ms[0].color };
+      leader:o.leader||null, color:ms[0].color, _forced:true };
     const before=this.parties.length;
     this._mergeAlliance(tmp, o.name||null);
     if(this.parties.length>=before) return {ok:false, why:'합당에 실패했다'};
@@ -4489,6 +4493,8 @@ class Sim {
     if(this.partyLock) return;
     const ms=a.members.map(id=>this.parties.find(p=>p.id===id)).filter(Boolean);
     if(ms.length<2) return;
+    // 연합의 합당도 같은 유권자를 다투는 정당끼리만 — 지역을 나눠 가진 당이 섞인 연합은 합당하지 않는다(사용자의 강제 합당은 허용)
+    if(!a._forced){ for(let x=0;x<ms.length;x++) for(let y=x+1;y<ms.length;y++) if(this._overlap(ms[x],ms[y])<0.3) return; }
     ms.sort((x,y)=>y.support-x.support);
     const big=ms[0], totS=ms.reduce((x,p)=>x+Math.max(p.support,0.001),0)||1;
     const cent=new Float64Array(6);
@@ -4824,6 +4830,30 @@ class Sim {
         const prev=m[f.fid]??tgt*0.5; keep[f.fid]=prev+(tgt-prev)*0.15; }
       p._facOrg=keep; }
   }
+  // ════ 지역 정당 — 집중도 · 스스로 생기는 활동 지역 ════
+  // 해마다 정당별로 '지지자 중 그 지역 비율 ÷ 그 지역 인구 비율'(집중도)을 잰다. 1배면 전국 정당, 몰릴수록 지역 정당.
+  // 지지가 한 지역에 몰리고 다른 곳엔 거의 없는 작은 정당은 가망 없는 지역에 후보를 내지 않는다(활동 지역이 생긴다).
+  // 지역 안 지지까지 무너지면 지역 정당 지위를 잃는다. 프리셋에서 정한 활동 지역도 같은 규칙을 따른다.
+  _sysRegional(){
+    const pop=new Float32Array(NREG), cnt=new Map(this.parties.map(p=>[p.id,new Float32Array(NREG)])); let adults=0;
+    for(let i=0;i<N;i++){ if(this.age[i]<(this.con.voteAge||18)) continue; adults++; const r=this.region[i]; pop[r]++; const c=cnt.get(this.party[i]); if(c) c[r]++; }
+    for(const p of this.parties){ if(p.id<0) continue; const c=cnt.get(p.id), tot=c.reduce((a,b)=>a+b,0);
+      p._regFrac=Array.from(c, v=>tot? v/tot : 0); p._regShare=Array.from(c, (v,r)=>pop[r]? v/pop[r] : 0);
+      p._regConc=p._regFrac.map((f,r)=>{ const ps=pop[r]/Math.max(1,adults); return ps>0? clamp((f/ps-1)/4, 0, 1) : 0; });
+      if(p.satellite || p.listOnly) continue;
+      if(p.turfR){ const best=Math.max(...p.turfR.map(r=>p._regShare[r]||0));
+        p._turfWeak= best<0.04? (p._turfWeak||0)+1 : 0;
+        if(p._turfWeak>=2){ p.turfR=null; p._turfWeak=0; this.pushNews(2,'norm',Sim._josa(`<b>${p.name}</b>, 지역 기반을 잃었다 — 전국 정당으로`)); } }
+      else if((p.support||0)<0.15 && tot>20){
+        // 지지자의 75%가 몰린 지역들이 소수(2개 또는 전체의 5분의 1 이하)이고 그 지역마다 10% 이상이면 — 호남 기반 정당처럼 여러 지역에 걸쳐도
+        const ord=[...p._regFrac.keys()].sort((a,b)=>p._regFrac[b]-p._regFrac[a]); const S=[]; let cum=0;
+        for(const r of ord){ S.push(r); cum+=p._regFrac[r]; if(cum>=0.75) break; }
+        if(S.length<=Math.max(2, Math.floor(NREG/5)) && S.every(r=>(p._regShare[r]||0)>=0.10)){
+          p.turfR=S; this.pushNews(2,'norm',Sim._josa(`<b>${p.name}</b>, 지역 정당으로 — ${S.map(r=>REGION_NAMES[r]).join('·')}에만 후보를 낸다`)); } }
+    }
+  }
+  // 두 정당 지지자의 지역 겹침(0~1) — 같은 유권자를 놓고 다투는 정도. 지역을 나눠 가진 정당(기민·기사련)은 0에 가깝다
+  _overlap(a,b){ if(!a._regFrac||!b._regFrac) return 1; let s=0; for(let r=0;r<NREG;r++) s+=Math.min(a._regFrac[r]||0, b._regFrac[r]||0); return s; }
   // ════ 활동 지역 ════
   // 활동 지역 인구 비중(1년 단위로 캐시)
   _turfPopShare(p){ if(!p.turfR) return 1; const y=this.year(); if(p._tpY===y) return p._tp;
@@ -17332,6 +17362,9 @@ class Sim {
           // 계수 5.0은 이념 거리 가중(0.60)의 여덟 배라 지역이 모든 것을 결정했다.
           // 실측 지역 집중도 79% — 한 정당이 한 지역을 통째로 먹는 수준이었다.
           u += this.regionalism * p.regAff[this.region[i]] * 2.2 * (0.6+this.tribalism[i]*0.8); // 우리 지역의 당
+        // 지역 정체성 — 지역의 속성(바이에른·스코틀랜드·플랑드르처럼 정체성이 강한 지역)과 정당의 그 지역 집중도로 정한다.
+        // 어느 정당이든(프리셋이든 시뮬레이션에서 생겼든) 그 지역에 지지가 몰려 있으면 똑같이 끌린다 — '그 지역의 당'
+        { const ID=this._regIdent? this._regIdent[myReg] : 0; if(ID>0 && p._regConc){ const c=p._regConc[myReg]||0; if(c>0) u += ID*c*(this.tune.regIdentK??0.8)*(0.6+this.tribalism[i]*0.8); } }
         if(p.home===this.region[i]) u += 0.08*(0.4+this.tribalism[i]);   // 지역주의: 거점 지역 결집
         u += Math.sqrt(p.support)*0.45*(0.5+this.conformity[i]);   // 밴드왜건(당선 가능성·동조)
         // 신생 정당의 조직 준비도 — 창당 직후에는 후보를 다 내지 못한다.
@@ -18582,6 +18615,8 @@ class Sim {
     const PT=Sim._presetPatches? Sim._presetPatches() : {};
     for(const k in PT) if(B[k]){ const o=B[k], p=PT[k]; B[k]=Object.assign({}, o, p, {con:Object.assign({}, o.con, p.con||{})}); }
     Object.assign(B, Sim._euPresets? Sim._euPresets() : {});
+    // 지역 정체성 — 지역의 속성(어느 정당이든 그 지역에 몰리면 끌린다)
+    const RI=Sim._presetRegionIdent? Sim._presetRegionIdent() : {}; for(const k in RI) if(B[k]) B[k]=Object.assign({}, B[k], {regionIdent:RI[k]});
     // 실제 연합·블록, 연합 봉쇄조항
     const BL=Sim._presetBlocs? Sim._presetBlocs() : {}; for(const k in BL) if(B[k]) B[k]=Object.assign({}, B[k], {blocs:BL[k]});
     if(B.czechia) B.czechia.con=Object.assign({}, B.czechia.con, {coalThr:{2:8,3:11}});
@@ -18876,7 +18911,11 @@ class Sim {
     if(P.resource!==undefined){ this.presetResource=P.resource; this.resourceEndow=null; this.initResource(); }
     let regionRenamed=false;
     // 지역 이름을 먼저 붙인다 — 정당의 활동 지역(기사련=바이에른)을 이름으로 찾기 때문이다
-    if(seedParties){ regionRenamed=applyRealRegionNames(key); if(P.seed) this._seedParties(P);
+    // 지역 정체성(0~1) — 프리셋이 지역 이름으로 준다(이름을 붙인 뒤에 찾는다). 없으면 0(지역주의는 기존 장치가 맡는다)
+    const setIdent=()=>{ this._regIdent=new Array(NREG).fill(0);
+      if(P.regionIdent) for(const [nm,v] of Object.entries(P.regionIdent)){ const r=REGION_NAMES.slice(0,NREG).indexOf(nm); if(r>=0) this._regIdent[r]=v; } };
+    if(!seedParties) setIdent();
+    if(seedParties){ regionRenamed=applyRealRegionNames(key); setIdent(); if(P.seed) this._seedParties(P);
       // 정당별 결속력·조직력을 프리셋 값으로 맞춘다
       if(P.seed) for(const sd of P.seed){
         const p=this.parties.find(x=>x.name===sd.name); if(!p) continue;
@@ -19026,6 +19065,7 @@ class Sim {
     if(P.structU!=null) this.structU=P.structU;      // 구조 실업 — 나라별 노동시장의 평소 수준
     if(P.moment) this._seedMoment(P.moment, made, adults, R);
     { const nat=made.map((p,k)=>{ if(!hasAge) return tgt[k]/ts; let s=0; for(let b=0;b<3;b++){ const nb=bandOf.filter(x=>x===b).length; s+=T[b][k]*nb; } return s/adults.length; });
+      if(this._sysRegional) this._sysRegional();   // 집중도를 먼저 재서 역산이 지역 정체성까지 감안하게
       this._calibrateValence(made, nat, adults); }
     this.recomputeStats&&this.recomputeStats();
     // era.regionalism이 있으면 그것이 우선한다(더 구체적인 값)
@@ -19293,6 +19333,17 @@ class Sim {
                P('새로운 슬로베니아 연합',0.088,'#1F4E9A',0.4,0.6,0,0.4), P('사회민주당',0.065,'#E30613',-0.4,-0.3,0.05,0),
                P('민주당',0.065,'#1E3A8A',0.4,0.2,0.1,0.2), P('좌파–베스나',0.055,'#B5003B',-0.8,-0.8,0.3,0),
                P('진실(Resni.ca)',0.050,'#4B5563',0,0.6,0.9,0.5,{anti:0.35}) ]},
+    };
+  }
+  // ════════ 지역 정체성 ════════ (0~1, 지역 이름으로) — 지역 정당이 버티는 이유를 정당이 아니라 지역에 둔다
+  static _presetRegionIdent(){
+    const FL={'안트베르펜':0.5,'동플랑드르':0.5,'서플랑드르':0.5,'플랑드르브라반트':0.5,'림뷔르흐':0.5}, WA={'에노':0.3,'리에주':0.3,'왈롱브라반트':0.3,'나뮈르':0.3,'뤽상부르':0.3};
+    return {
+      germany:{'바이에른':0.6},
+      uk:{'북아일랜드':0.8,'스코틀랜드':0.7,'웨일스':0.5}, uk2019:{'북아일랜드':0.8,'스코틀랜드':0.7,'웨일스':0.5},
+      belgium:Object.assign({'브뤼셀':0.2}, FL, WA),
+      italy:{'트렌티노주':0.7,'발레다오스타주':0.5,'사르데냐주':0.4},
+      finland:{'올란드':0.9},
     };
   }
   // ════════ 실제 연합·블록 ════════
