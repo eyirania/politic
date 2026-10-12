@@ -2772,6 +2772,166 @@ function buildWorld(nreg, seed, landRatio, opts){
   return { nreg, seed, sea, traits, names, paths, seaD, riverD, capital, T, owner,
            nMain, nIsland, islands:(nIsland||0) };
 }
+
+// ════════ 선거구 벌집 지도 — 국토 모양을 따르는 육각형 카토그램 ════════
+// 선거구 수는 인구에 비례하는데 지도는 면적이라, 그대로 벌집을 깔면 수도권은 깨알·시골은 거대해진다.
+//  ① 고무판 카토그램(Dougenik·Chrisman·Niemeyer 1985) — 지역 경계 꼭짓점을 밀고 당겨 면적을 의석 비율에 가깝게
+//  ② 그 위에 육각형 격자를 깔되 육지 칸 수가 총 의석과 같아지도록 칸 크기를 찾는다
+//  ③ 칸 수 맞추기 — 의석보다 칸이 모자란 지역은 이웃에게서, 남는 지역은 이웃에게 한 칸씩 넘긴다.
+//     바다도 하나의 '지역'으로 보아 해안 칸을 내주고 받는다. 넘길 칸은 받는 쪽 중심에 가깝고
+//     주는 쪽을 둘로 끊지 않는 것으로 고른다(지역 그래프의 최단 경로로 사슬처럼 밀어낸다).
+//  ④ 지역 안에서는 다인 선거구를 붙은 칸 묶음으로 — 바깥에서 안으로 벗겨 내며 묶는다.
+// 입력: paths(지역별 SVG 경로, M/L/Z 직선), labels([[x,y]…] 지역 대표점), quota(지역별 의석), groups(지역별 [선거구 크기…], 선거구 순서)
+// 출력: {s(육각형 반지름), cells:[{x,y,col,row,r,g,k}], W, H} — g = 지역 안 선거구 순번, k = 그 선거구 안 의석 순번
+function _hcParse(d){
+  const rings=[]; let cur=null;
+  const re=/([MLZ])|(-?\d*\.?\d+(?:e-?\d+)?)/gi; let m, nums=[], cmd=null;
+  const flush=()=>{ for(let i=0;i+1<nums.length;i+=2){ if(cmd==='M' && i===0){ cur=[]; rings.push(cur); } if(cur) cur.push([nums[i],nums[i+1]]); } nums=[]; };
+  while((m=re.exec(d))){ if(m[1]){ flush(); cmd=m[1].toUpperCase(); if(cmd==='Z') cur=null; } else nums.push(+m[2]); }
+  flush(); return rings.filter(r=>r.length>=3);
+}
+function _hcArea(ring){ let a=0; for(let i=0,j=ring.length-1;i<ring.length;j=i++) a+=(ring[j][0]+ring[i][0])*(ring[j][1]-ring[i][1]); return a/2; }
+function _hcInside(x,y,rings){ let c=false;
+  for(const R of rings) for(let i=0,j=R.length-1;i<R.length;j=i++){ const a=R[i], b=R[j];
+    if(((a[1]>y)!==(b[1]>y)) && x < (b[0]-a[0])*(y-a[1])/(b[1]-a[1])+a[0]) c=!c; }
+  return c; }
+function hexCartogram(paths, labels, quota, groups, opt){
+  opt=opt||{}; const NR=paths.length, Q=quota.reduce((a,b)=>a+b,0); if(!Q) return null;
+  // ① 고무판 카토그램
+  const reg=paths.map(_hcParse), lab=labels.map(l=> l? [l[0],l[1]] : null);
+  const iters=opt.iters??25;
+  for(let it=0;it<iters;it++){
+    const A=reg.map(rs=>Math.max(1e-6, rs.reduce((a,r)=>a+Math.abs(_hcArea(r)),0)));
+    const C=reg.map((rs,k)=>{ let sx=0,sy=0,sa=0; for(const r of rs){ const a=Math.abs(_hcArea(r)); let cx=0,cy=0; for(const p of r){ cx+=p[0]; cy+=p[1]; } sx+=cx/r.length*a; sy+=cy/r.length*a; sa+=a; } return sa? [sx/sa, sy/sa] : (lab[k]||[0,0]); });
+    const TA=A.reduce((a,b)=>a+b,0), w=quota.map(q=>Math.max(q,0.3)), TW=w.reduce((a,b)=>a+b,0);
+    const D=w.map(x=>TA*x/TW);
+    let err=0; for(let k=0;k<NR;k++) err+=Math.max(A[k],D[k])/Math.min(A[k],D[k])-1; err/=NR;
+    if(err<0.02) break;
+    const fr=1/(1+err);
+    const rad=A.map(a=>Math.sqrt(a/Math.PI)), mass=A.map((a,k)=>Math.sqrt(D[k]/Math.PI)-rad[k]);
+    const move=p=>{ let dx=0, dy=0;
+      for(let k=0;k<NR;k++){ if(!reg[k].length) continue; const vx=p[0]-C[k][0], vy=p[1]-C[k][1], d=Math.hypot(vx,vy)||1e-6;
+        const F= d>rad[k]? mass[k]*rad[k]/d : mass[k]*(d*d/(rad[k]*rad[k]))*(4-3*d/rad[k]); dx+=F*vx/d; dy+=F*vy/d; }
+      p[0]+=dx*fr; p[1]+=dy*fr; };
+    for(const rs of reg) for(const r of rs) for(const p of r) move(p);
+    for(const p of lab) if(p) move(p);
+  }
+  // 경계 상자
+  let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9; for(const rs of reg) for(const r of rs) for(const [x,y] of r){ x0=Math.min(x0,x); y0=Math.min(y0,y); x1=Math.max(x1,x); y1=Math.max(y1,y); }
+  const bb=reg.map(rs=>{ let a=1e9,b=1e9,c=-1e9,d=-1e9; for(const r of rs) for(const [x,y] of r){ a=Math.min(a,x); b=Math.min(b,y); c=Math.max(c,x); d=Math.max(d,y); } return [a,b,c,d]; });
+  const own=(x,y)=>{ for(let k=0;k<NR;k++){ const B=bb[k]; if(x<B[0]||x>B[2]||y<B[1]||y>B[3]) continue; if(_hcInside(x,y,reg[k])) return k; } return -1; };
+  // ② 칸 크기 — 육지 칸 수 ≈ 총 의석
+  const lattice=s=>{ const dx=Math.sqrt(3)*s, dy=1.5*s, m=3;
+    const c0=Math.floor((x0)/dx)-m, c1=Math.ceil(x1/dx)+m, r0=Math.floor(y0/dy)-m, r1=Math.ceil(y1/dy)+m;
+    const cells=[]; for(let row=r0;row<=r1;row++) for(let col=c0;col<=c1;col++){ const x=col*dx+((row&1)? dx/2 : 0), y=row*dy; cells.push({x,y,col,row,o:own(x,y)}); }
+    return cells; };
+  const land=cs=>cs.reduce((a,c)=>a+(c.o>=0),0);
+  const TA=reg.reduce((a,rs)=>a+rs.reduce((b,r)=>b+Math.abs(_hcArea(r)),0),0);
+  let lo=Math.sqrt(TA/Q/2.598)*0.5, hi=lo*4, best=null;
+  for(let it=0;it<18;it++){ const s=(lo+hi)/2, cs=lattice(s), n=land(cs); if(!best || Math.abs(n-Q)<Math.abs(best.n-Q)) best={s,cs,n}; if(n>Q) lo=s; else hi=s; if(n===Q) break; }
+  const s=best.s, cells=best.cs, SEA=NR;
+  // 이웃 — 홀수 행이 반 칸 오른쪽(odd-r)
+  const key=(c,r)=>c+','+r, at=new Map(cells.map((c,i)=>[key(c.col,c.row),i]));
+  // 둘레를 한 바퀴 도는 순서: 동·북동·북서·서·남서·남동
+  const RING_E=[[1,0],[0,-1],[-1,-1],[-1,0],[-1,1],[0,1]], RING_O=[[1,0],[1,-1],[0,-1],[-1,0],[0,1],[1,1]];
+  const nbs=cells.map(c=>{ const T=(c.row&1)? RING_O : RING_E; return T.map(([a,b])=>{ const j=at.get(key(c.col+a,c.row+b)); return j==null? -1 : j; }); });
+  const o=cells.map(c=> c.o>=0? c.o : SEA);
+  // 지역 중심(카토그램 위) — 받는 칸을 고를 때 쓴다
+  const cen=reg.map((rs,k)=>{ if(lab[k]) return lab[k]; let sx=0,sy=0,n=0; for(const r of rs) for(const p of r){ sx+=p[0]; sy+=p[1]; n++; } return n? [sx/n,sy/n] : [(x0+x1)/2,(y0+y1)/2]; });
+  const q=[...quota, cells.length-Q];
+  const cnt=new Array(NR+1).fill(0); o.forEach(k=>cnt[k]++);
+  // 의석이 있는데 칸이 하나도 없는 지역(작은 도시) — 대표점에서 가장 가까운 칸을 먼저 준다
+  for(let k=0;k<NR;k++) if(quota[k]>0 && !cnt[k]){ let bi=-1, bd=1e18; cells.forEach((c,i)=>{ if(cnt[o[i]]<=1 && o[i]!==SEA) return; const d=(c.x-cen[k][0])**2+(c.y-cen[k][1])**2; if(d<bd){ bd=d; bi=i; } }); if(bi>=0){ cnt[o[bi]]--; o[bi]=k; cnt[k]++; } }
+  // 이 칸을 빼도 주인 지역이 둘로 끊기지 않는가(둘레 6칸에서 같은 주인이 한 덩어리인지)
+  const safe=(i,a)=>{ if(a===SEA) return true; const N6=nbs[i]; let runs=0, any=0;
+    for(let t=0;t<6;t++){ const cur=N6[t]>=0 && o[N6[t]]===a, prev=N6[(t+5)%6]>=0 && o[N6[(t+5)%6]]===a; if(cur){ any++; if(!prev) runs++; } }
+    return any===0 || runs<=1; };
+  const d2=(i,k)=> k===SEA? 0 : (cells[i].x-cen[k][0])**2+(cells[i].y-cen[k][1])**2;
+  const give=(a,b)=>{   // a → b 한 칸
+    let bi=-1, bc=1e18, bs=false;
+    for(let i=0;i<cells.length;i++){ if(o[i]!==a) continue; const N6=nbs[i]; if(!N6.some(j=>j>=0 && o[j]===b) && !(b===SEA && N6.some(j=>j<0))) continue;
+      const sf=safe(i,a), c=(b===SEA? -d2(i,a) : d2(i,b)-d2(i,a)*0.5);
+      if((sf && !bs) || (sf===bs && c<bc)){ bi=i; bc=c; bs=sf; } }
+    if(bi<0) return false; o[bi]=b; cnt[a]--; cnt[b]++; return true; };
+  for(let guard=0; guard<Q*8; guard++){
+    // 가장 많이 모자란 곳
+    let r=-1, gap=0; for(let k=0;k<=NR;k++){ const g=q[k]-cnt[k]; if(g>gap){ gap=g; r=k; } } if(r<0) break;
+    // 지역 그래프 — 칸이 맞닿은 지역끼리
+    const adj=Array.from({length:NR+1},()=>new Set());
+    for(let i=0;i<cells.length;i++){ const a=o[i]; for(const j of nbs[i]){ const b= j<0? SEA : o[j]; if(b!==a){ adj[a].add(b); adj[b].add(a); } } }
+    const prev=new Array(NR+1).fill(-2); prev[r]=-1; const qu=[r]; let g=-1;
+    while(qu.length){ const x=qu.shift(); if(x!==r && cnt[x]>q[x]){ g=x; break; } for(const y of adj[x]) if(prev[y]===-2){ prev[y]=x; qu.push(y); } }
+    if(g<0) break;
+    // g에서 r 쪽으로 사슬처럼 한 칸씩
+    const path=[]; for(let x=g;x!==-1;x=prev[x]) path.push(x);   // g … r
+    let okAll=true; for(let t=0;t+1<path.length;t++) if(!give(path[t], path[t+1])){ okAll=false; break; }
+    if(!okAll) break;
+  }
+  // ③' 다듬기 — 맞닿은 두 칸의 주인을 맞바꿔(칸 수는 그대로) 각 지역이 제 중심에 모이게 한다. 사슬 이동이 남긴 촉수를 걷어 낸다.
+  //     중심은 현재 칸들의 평균과 카토그램 대표점의 중간 — 덩어리는 둥글게, 자리는 실제 위치 쪽으로
+  for(let pass=0; pass<(opt.smooth??40); pass++){
+    const sx=new Float64Array(NR), sy=new Float64Array(NR), sn=new Float64Array(NR);
+    for(let i=0;i<cells.length;i++){ const a=o[i]; if(a===SEA) continue; sx[a]+=cells[i].x; sy[a]+=cells[i].y; sn[a]++; }
+    const cc=cen.map((c,k)=> sn[k]? [(sx[k]/sn[k]+c[0])/2, (sy[k]/sn[k]+c[1])/2] : c);
+    const D=(i,k)=>(cells[i].x-cc[k][0])**2+(cells[i].y-cc[k][1])**2;
+    let moved=0;
+    for(let i=0;i<cells.length;i++){ const a=o[i]; if(a===SEA) continue;
+      for(const j of nbs[i]){ if(j<0) continue; const b=o[j]; if(b===a || b===SEA) continue;
+        const gain=D(i,a)+D(j,b)-D(i,b)-D(j,a); if(gain<=1e-6) continue;
+        // 바꾼 뒤에도 i는 b의 다른 칸에, j는 a의 다른 칸에 붙어 있어야 하고, 각자 원래 지역을 끊지 않아야 한다
+        if(!nbs[i].some(t=>t>=0 && t!==j && o[t]===b) || !nbs[j].some(t=>t>=0 && t!==i && o[t]===a)) continue;
+        if(!safe(i,a) || !safe(j,b)) continue;
+        o[i]=b; o[j]=a; moved++; break; } }
+    if(!moved) break;
+  }
+  // ③'' 조각 정리 — 본체에서 떨어진 작은 조각(1~2칸 섬 부스러기, 사슬 이동의 잔재)은 둘러싼 쪽에 내주고
+  //      같은 수만큼 본체 가장자리에서 받아 온다(칸 수 유지). 실제 큰 섬(제주·홋카이도 등)처럼 몫이 큰 조각은 남긴다.
+  //      바다에 둘러싸인 구멍 칸은 그 지역의 가장 먼 해안 칸과 맞바꿔 메운다.
+  const comps=k=>{ const seen=new Set(), out=[]; for(let i=0;i<cells.length;i++){ if(o[i]!==k || seen.has(i)) continue;
+      const cp=[i]; seen.add(i); for(let h=0;h<cp.length;h++) for(const j of nbs[cp[h]]) if(j>=0 && o[j]===k && !seen.has(j)){ seen.add(j); cp.push(j); } out.push(cp); }
+    return out.sort((a,b)=>b.length-a.length); };
+  const takeNear=(k, main, from)=>{   // k가 본체(main)에 붙은 칸 하나를 from(지역 또는 바다)에게서 받는다 — k 중심에 가까운 것
+    const ms=new Set(main); let bi=-1, bd=1e18;
+    for(let i=0;i<cells.length;i++){ if(o[i]!==from) continue; if(!nbs[i].some(j=>j>=0 && ms.has(j))) continue; if(from!==SEA && !safe(i,from)) continue;
+      const d=d2(i,k); if(d<bd){ bd=d; bi=i; } }
+    if(bi<0) return false; o[bi]=k; return true; };
+  for(let round=0; round<3; round++){
+    for(let k=0;k<NR;k++){ const C=comps(k); if(C.length<2) continue; const main=C[0];
+      for(const cp of C.slice(1)){ if(cp.length>=Math.max(3, 0.3*quota[k])) continue;
+        for(const i of cp){ const cntN=new Map(); for(const j of nbs[i]){ const b= j<0? SEA : o[j]; if(b!==k) cntN.set(b,(cntN.get(b)||0)+1); }
+          const to=[...cntN.entries()].sort((a,b)=>b[1]-a[1])[0]; const giveTo= to? to[0] : SEA;
+          o[i]=giveTo; if(!takeNear(k, comps(k)[0]||main, giveTo)) o[i]=k; } } }
+    // 구멍 메우기 — 바깥 바다(격자 가장자리와 이어진 바다)에 닿지 않는 바다 칸
+    const ocean=new Uint8Array(cells.length), qq=[]; for(let i=0;i<cells.length;i++) if(o[i]===SEA && nbs[i].some(j=>j<0)){ ocean[i]=1; qq.push(i); }
+    for(let h=0;h<qq.length;h++) for(const j of nbs[qq[h]]) if(j>=0 && o[j]===SEA && !ocean[j]){ ocean[j]=1; qq.push(j); }
+    for(let i=0;i<cells.length;i++){ if(o[i]!==SEA || ocean[i]) continue; const N6=nbs[i].filter(j=>j>=0 && o[j]!==SEA); if(!N6.length) continue;
+      const cntN=new Map(); for(const j of N6) cntN.set(o[j],(cntN.get(o[j])||0)+1);
+      for(const [k] of [...cntN.entries()].sort((a,b)=>b[1]-a[1])){   // 해안이 없는 내륙 지역이면 다음 이웃으로
+        let bi=-1, bd=-1; for(let t=0;t<cells.length;t++){ if(o[t]!==k || !nbs[t].some(j=>j<0 || (o[j]===SEA && ocean[j])) || !safe(t,k)) continue; const d=d2(t,k); if(d>bd){ bd=d; bi=t; } }
+        if(bi>=0){ o[bi]=SEA; ocean[bi]=1; o[i]=k; break; } } }
+  }
+  // ④ 지역 안 선거구 묶음 — 대표점에서 먼 칸부터 벗겨 내며 크기만큼 붙은 칸을 묶는다
+  const outCells=[];
+  for(let k=0;k<NR;k++){
+    const mine=[]; for(let i=0;i<cells.length;i++) if(o[i]===k) mine.push(i);
+    const G=(groups && groups[k]) || mine.map(()=>1);
+    const free=new Set(mine), far=i=>d2(i,k);
+    const order=[];   // 묶음 목록(바깥 → 안)
+    for(let gi=0; gi<G.length && free.size; gi++){ const size=G[gi];
+      let st=-1, sd=-Infinity; for(const i of free){ const nfree=nbs[i].filter(j=>free.has(j)).length, sc=far(i)-nfree*s*s*0.8; if(sc>sd){ sd=sc; st=i; } }
+      const grp=[st]; free.delete(st);
+      while(grp.length<size && free.size){ let bi=-1, bd=1e18;
+        for(const i of grp) for(const j of nbs[i]) if(j>=0 && free.has(j)){ const sc=-(far(j)) + grp.reduce((a,m)=>a+(cells[m].x-cells[j].x)**2+(cells[m].y-cells[j].y)**2,0)*0.6; if(sc<bd){ bd=sc; bi=j; } }
+        if(bi<0){ for(const j of free){ const sc=grp.reduce((a,m)=>a+(cells[m].x-cells[j].x)**2+(cells[m].y-cells[j].y)**2,0); if(sc<bd){ bd=sc; bi=j; } } }
+        grp.push(bi); free.delete(bi); }
+      order.push(grp); }
+    // 선거구 순번 0(동네 키 낮은 쪽)을 바깥에 — 안쪽(지역 중심)일수록 높은 순번
+    order.forEach((grp,gi)=>grp.forEach((i,kk)=>{ const c=cells[i]; outCells.push({x:c.x, y:c.y, col:c.col, row:c.row, r:k, g:gi, k:kk}); }));
+  }
+  let X0=1e9,Y0=1e9,X1=-1e9,Y1=-1e9; for(const c of outCells){ X0=Math.min(X0,c.x); Y0=Math.min(Y0,c.y); X1=Math.max(X1,c.x); Y1=Math.max(Y1,c.y); }
+  for(const c of outCells){ c.x-=X0-s*1.2; c.y-=Y0-s*1.2; }
+  return {s, cells:outCells, W:X1-X0+s*2.4, H:Y1-Y0+s*2.4};
+}
 class Sim {
   // ════════ 공통 헬퍼 ════════
   // 40여 개 모듈에서 반복되던 표현을 한곳에 모은다.
@@ -15184,6 +15344,7 @@ class Sim {
   districtHex(){
     const DR=this.districtResults||[];
     if(!DR.length) return null;
+    const G=this.districtHexGeo? this.districtHexGeo(DR) : null; if(G) return G;
     // 지역별로 묶어 벌집 좌표를 만든다
     const byReg=new Map();
     for(const d of DR){
@@ -15214,6 +15375,31 @@ class Sim {
     const maxRow=Math.max(...cells.map(c=>c.row))+1;
     return {cells, cols:maxCol, rows:maxRow,
       swing:cells.filter(c=>c.swing).length, total:cells.length};
+  }
+
+  // 국토 모양 벌집(06-hexcarto.js) — 칸 = 의석, 다인 선거구는 붙은 칸 묶음. 의석 배치가 같으면 계산을 다시 하지 않는다
+  districtHexGeo(DR){
+    if(typeof hexCartogram!=='function' || typeof WORLD==='undefined' || !WORLD || !WORLD.paths || WORLD.paths.length!==NREG) return null;
+    const byReg=Array.from({length:NREG},()=>[]); for(const d of DR) if(d.reg>=0 && d.reg<NREG) byReg[d.reg].push(d);
+    for(const L of byReg) L.sort((a,b)=>a.d-b.d);
+    const quota=byReg.map(L=>L.reduce((a,d)=>a+(d.mag||1),0)), groups=byReg.map(L=>L.map(d=>d.mag||1));
+    const sx=TERRAIN.VIEW_W/WORLD.T.W, sy=TERRAIN.VIEW_H/WORLD.T.H;
+    const key=(this.tune.hexIters??'')+'|'+(this.tune.hexSmooth??'')+'|'+WORLD.seed+'|'+NREG+'|'+REGION_NAMES[0]+'|'+(WORLD.paths[0]||'').length+'|'+(WORLD.real?1:0)+'|'+groups.map(g=>g.join('.')).join('/');
+    if(!this._hexGeo || this._hexGeo.key!==key){
+      let L=null; try{ L=hexCartogram(WORLD.paths, WORLD.traits.map(t=>t? [t._cx*sx, t._cy*sy] : null), quota, groups, {iters:this.tune.hexIters, smooth:this.tune.hexSmooth}); }catch(e){ L=null; }
+      this._hexGeo={key, L}; }
+    const L=this._hexGeo.L; if(!L || !L.cells.length) return null;
+    const pc=id=>{ const p=this.parties.find(q=>q.id===id); return p? p.color : '#555'; };
+    const seatsOf=d=>{ const M=d.mag||1; let ids=[];
+      if(d.seats) for(const [id,n] of Object.entries(d.seats)) for(let k=0;k<n;k++) ids.push(+id);
+      else if(d.all) ids=d.all.filter(x=>x.won).map(x=>x.id);
+      if(!ids.length) ids=[d.win]; while(ids.length<M) ids.push(ids[ids.length-1]); return ids.slice(0,M); };
+    const cells=[]; let swing=0;
+    for(const c of L.cells){ const d=byReg[c.r][c.g]; if(!d) continue; const ids=seatsOf(d), id=ids[c.k]??d.win;
+      const sw=(d.margin??99)<5; cells.push({x:c.x, y:c.y, col:c.col, row:c.row, reg:c.r, d:d.d, k:c.k, pid:id, color:pc(id), margin:d.margin??0, mag:d.mag||1,
+        name:this.districtName? this.districtName(d.d) : ('제'+d.d+'구'), swing:sw }); }
+    for(const L2 of byReg) for(const d of L2) if((d.margin??99)<5) swing++;
+    return {geo:true, s:L.s, W:L.W, H:L.H, cells, swing, total:DR.length, seats:cells.length};
   }
 
   // ── ⑥ 계파 트리 ──
@@ -24063,7 +24249,7 @@ Object.assign(UI, {
       terrain:'시민 심리를 좌우·권위 평면에 투영한 인구 밀도. 봉우리가 갈라지는 것이 양극화다.',
       trail:'정당이 지나온 이념 궤적. 꼬리가 길수록 오래 살아남았고, 굽은 곳이 노선 전환이다.',
       flow:'직전 선거와 비교해 의석이 어디서 어디로 흘렀는가.',
-      hex:'선거구를 육각형으로 배치했다. 면적 왜곡이 없어 접전지가 그대로 보인다.',
+      hex:'선거구를 육각형 칸으로 국토 모양을 따라 배치했다. 칸 크기가 같아 접전지가 면적 왜곡 없이 보인다.',
       rings:'정당 내부 계파 구성. 조각 크기가 지분, 색이 급진성이다.',
       polls:'조사기관들의 여론조사를 편향 보정해 집계하고, 그 여론으로 다음 총선을 1,000번 시뮬레이션한다.',
       policy:'정책이 누구의 선호를 따르나 — 자산 상위 10% · 중위층 · 하위 20%. 정치자금 제도에 따라 달라진다(길렌스).',
@@ -24249,6 +24435,7 @@ Object.assign(UI, {
     const s=this.sim;
     const Hx=s.districtHex? s.districtHex() : null;
     if(!Hx) return '<div class="muted" style="font-size:11px">지역구가 없는 제도다.</div>';
+    if(Hx.geo) return this._visHexGeo(Hx);
     const R=9, dx=R*1.74, dy=R*1.52;
     const W=Hx.cols*dx+R*3, H=Hx.rows*dy+R*3;
     const hex=(cx,cy,r)=>{
@@ -24272,6 +24459,46 @@ Object.assign(UI, {
       ${cells}</svg>
     <div class="mut10">색 = 1위 정당 · 진하기 = 격차(옅으면 접전) · 흰 테두리 = 5%p 이내 접전지
       · 전체 ${Hx.total}곳 중 접전 <b>${Hx.swing}곳</b></div>`;
+  },
+
+  // 국토 모양 벌집 — 칸 = 의석(면적이 의석에 비례하도록 국토를 일그러뜨렸다). 다인 선거구는 굵은 선으로 묶는다
+  _visHexGeo(Hx){
+    const S=Hx.s, at=new Map(Hx.cells.map((c,i)=>[c.col+','+c.row,i]));
+    const RE=[[1,0],[0,-1],[-1,-1],[-1,0],[-1,1],[0,1]], RO=[[1,0],[1,-1],[0,-1],[-1,0],[0,1],[1,1]], EV=[[0,1],[5,0],[4,5],[3,4],[2,3],[1,2]];
+    const cor=(c,i,r)=>{ const a=Math.PI/180*(60*i-30); return (c.x+r*Math.cos(a)).toFixed(2)+','+(c.y+r*Math.sin(a)).toFixed(2); };
+    const esc=t=>String(t).replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+    const P=this.sim.parties; const pn=id=>{ const p=P.find(q=>q.id===id); return p? p.name : '—'; };
+    let fills='', eD='', eR='', eC='', eS='';
+    for(const c of Hx.cells){
+      let d=''; for(let i=0;i<6;i++) d+=(i?'L':'M')+cor(c,i,S*0.985);
+      const op=clamp(0.34+Math.min(c.margin,30)/30*0.66, 0.34, 1);
+      fills+=`<path d="${d}Z" fill="${c.color}" opacity="${op.toFixed(2)}"><title>${esc(c.name)}${c.mag>1? ` · ${c.mag}인 중 ${c.k+1}번째 의석` : ''} · ${esc(pn(c.pid))} · 격차 ${c.margin.toFixed(1)}%p</title></path>`;
+      const T=(c.row&1)? RO : RE;
+      T.forEach(([a,b],t)=>{ const j=at.get((c.col+a)+','+(c.row+b)), o= j==null? null : Hx.cells[j];
+        if(o && t>2) return;   // 맞닿은 변은 한 번만
+        const [i1,i2]=EV[t], seg=`M${cor(c,i1,S)}L${cor(c,i2,S)}`;
+        if(!o) eC+=seg; else if(o.reg!==c.reg) eR+=seg; else if(o.d!==c.d) eD+=seg;
+        if(c.swing && (!o || o.d!==c.d)) eS+=seg;
+        if(o && o.swing && o.d!==c.d) eS+=seg; }); }
+    // 지역 이름 — 칸이 많은 지역부터, 겹치면 뺀다
+    const R=new Map(); for(const c of Hx.cells){ const v=R.get(c.reg)||{x:0,y:0,n:0}; v.x+=c.x; v.y+=c.y; v.n++; R.set(c.reg,v); }
+    const fs=clamp(Math.min(Hx.W,Hx.H)/38, S*0.8, S*1.3), box=[]; let labs='';
+    for(const [r,v] of [...R.entries()].sort((a,b)=>b[1].n-a[1].n)){ if(v.n<3) continue;
+      const nm=String(REGION_NAMES[r]||'').replace(/\s/g,'').replace(/(특별자치시|특별자치도|특별시|광역시|연방관구)$/,'').replace(/\(.*\)$/,'').slice(0,5);
+      const x=v.x/v.n, y=v.y/v.n, w=nm.length*fs*0.95, b=[x-w/2, y-fs*0.8, x+w/2, y+fs*0.3];
+      if(box.some(q=>b[0]<q[2] && q[0]<b[2] && b[1]<q[3] && q[1]<b[3])) continue; box.push(b);
+      labs+=`<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" text-anchor="middle" font-size="${fs.toFixed(1)}" fill="#fff" stroke="rgba(8,12,22,0.85)" stroke-width="${(fs*0.22).toFixed(2)}" paint-order="stroke" font-family="var(--mono)" pointer-events="none">${esc(nm)}</text>`; }
+    const mmd=Hx.seats>Hx.total;
+    return `<svg viewBox="0 0 ${Hx.W.toFixed(1)} ${Hx.H.toFixed(1)}" style="width:100%;max-height:72vh;display:block">
+      ${fills}
+      <path d="${eD}" fill="none" stroke="rgba(8,12,22,${mmd?0.95:0.55})" stroke-width="${(S*(mmd?0.26:0.07)).toFixed(2)}" stroke-linecap="round"/>
+      <path d="${eR}" fill="none" stroke="rgba(255,255,255,0.75)" stroke-width="${(S*0.15).toFixed(2)}" stroke-linecap="round"/>
+      <path d="${eC}" fill="none" stroke="rgba(140,200,255,0.7)" stroke-width="${(S*0.11).toFixed(2)}" stroke-linecap="round"/>
+      <path d="${eS}" fill="none" stroke="#ffd84a" stroke-width="${(S*0.09).toFixed(2)}" stroke-linecap="round" opacity="0.9"/>
+      ${labs}</svg>
+    <div class="mut10">칸 하나 = 의석 하나 · 국토 모양을 따르되 면적이 의석에 비례하도록 일그러뜨렸다(인구가 많은 지역이 크다)
+      · 색 = 당선 정당 · 진하기 = 격차(옅으면 접전) · 노란 테두리 = 5%p 이내 접전지 · 흰 선 = 지역 경계${mmd? ' · 굵은 선으로 묶인 칸 = 한 선거구(다인 선거구)' : ''}
+      · 선거구 ${Hx.total}곳 중 접전 <b>${Hx.swing}곳</b></div>`;
   },
 
   // ⑥ 계파 링
