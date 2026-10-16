@@ -537,7 +537,7 @@ body.noMapLbl .mLbl{display:none}
 .mLblTog.off{opacity:0.55;text-decoration:line-through}
 #cntSeatBar.two{display:block;height:auto;background:none;overflow:visible}
 .cntRow{display:flex;align-items:center;gap:7px;margin:3px 0}
-.cntRow>.lb{width:70px;flex:none;text-align:right;font-size:10.5px;color:var(--tx2)}
+.cntRow>.lb{width:84px;flex:none;text-align:right;font-size:10px;color:var(--tx2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .cntRow>.lb i{font-style:normal;color:#f2b35b;margin-left:2px}
 .cntRow>.bar{flex:1;display:flex;height:20px;border-radius:5px;overflow:hidden;background:rgba(255,255,255,0.06)}
 .cntRow>.bar>div{transition:width .15s;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;text-shadow:0 1px 2px #0009;white-space:nowrap;overflow:hidden}
@@ -28839,7 +28839,12 @@ Object.assign(UI, {
     $('#cntTitle').textContent=`${rec.y}년 총선 개표 중계`;
     $('#cntSub').textContent=`${METHODNAME[rec.method]||rec.method} · 선거구 ${n}곳${MULTI.size? ` (${Math.round((T-pTot)/Math.max(1,n))}인 선거구)` : ''}${pTot? ` + 비례 ${pTot}석` : ''} · 과반 ${need}석`;
     const counted=[], seatC=new Map(), feed=[]; this._cntFlipAt=null;
-    $('#cntSeatBar').classList.toggle('two', pTot>0);
+    // 의석 원천별 줄 — 소·중·대선거구, 비례대표, 유보·재외·기능별·보너스·초과의석 등 원천이 둘 이상이면 원천마다 한 줄(의석 원천 패널과 같은 구분)
+    const SS=(rec.seatSources && rec.seatSources.bySource && rec.seatSources.bySource.filter(x=>x.seats>0).length>1)? rec.seatSources.bySource.filter(x=>x.seats>0) : null;
+    const esc=t=>String(t).replace(/[<>&"]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+    const DCLS=new Set(['소선거구','중선거구','대선거구']), clsOf=mag=> mag===1? '소선거구' : mag<=5? '중선거구' : '대선거구';
+    const seatByCls=new Map();   // 원천(선거구 크기) → 정당 → 개표된 의석
+    $('#cntSeatBar').classList.toggle('two', pTot>0 || !!SS);
     // 잠정 비례 — 개표된 지역구의 득표(정당 명부 표에 가깝다)를 쌓아 봉쇄조항을 넘은 정당에 최대잔여 방식으로 나눈다
     // 잠정 비례 — 개표된 지역이 전체 지역과 얼마나 다른지(농촌 먼저 개표되는 쏠림)를 보여준다.
     const acc=new Map(), all=new Map(); let allT=0;
@@ -28893,7 +28898,26 @@ Object.assign(UI, {
       const segs=(m,tot)=>byLR.filter(r=>m.get(r.id)).map(r=>{ const c=m.get(r.id), w=c/tot*100, I=info(r.id);
         return `<div style="width:${w}%;background:${I.color}" title="${I.name} ${c}석">${w>7? c : ''}</div>`; }).join('');
       let shown;
-      if(pTot){
+      // 원천별 줄 그리기 — 개표 중엔 지역구 원천은 개표된 선거구 당선, 비례는 잠정 배분, 나머지(유보·보너스·초과 …)는 개표 뒤 확정
+      const lrOf=new Map(rec.results.map(r=>[r.name, r.lr??0]));
+      const segL=(L,tot)=>{ tot=Math.max(tot, L.reduce((a,x)=>a+x.seats,0)); return L.filter(x=>x.seats>0).sort((a,b)=>(lrOf.get(a.base)??0)-(lrOf.get(b.base)??0)).map(x=>{ const w=x.seats/tot*100;
+        return `<div style="width:${w}%;background:${x.color}" title="${esc(x.name)} ${x.seats}석">${w>7? x.seats : ''}</div>`; }).join(''); };
+      const fromIds=m=>[...m.entries()].map(([id,c])=>{ const I=info(id); return {name:I.name, base:I.name, color:I.color, seats:c}; });
+      const scaleTo=(m,tot)=>{ const T0=[...m.values()].reduce((a,b)=>a+b,0); if(!T0) return new Map(); const q=[...m.entries()].map(([id,v])=>{ const x=v/T0*tot; return [id, Math.floor(x), x-Math.floor(x)]; });
+        let left=tot-q.reduce((a,x)=>a+x[1],0); q.sort((a,b)=>b[2]-a[2]); for(let i=0;i<q.length&&left>0;i++,left--) q[i][1]++; return new Map(q.map(x=>[x[0],x[1]])); };
+      const srcRows=()=>SS.map(src=>{ const fin=k>=n, tot=src.seats; let L, prov=false, note='';
+          if(fin) L=(src.parties||[]).map(x=>({name:x.name, base:String(x.name).replace(/ \(.*\)$/,''), color:x.color, seats:x.seats}));
+          else if(DCLS.has(src.name)) L=fromIds(seatByCls.get(src.name)||new Map());
+          else if(src.name==='비례대표'){ prov=true; L= counted.length? fromIds(scaleTo(provPR(), tot)) : []; note=' <i>잠정</i>'; }
+          else { prov=true; L=[]; note=' <i>대기</i>'; }
+          const nm=src.name.replace('다수당 ','').replace(' 의석','');
+          return `<div class="cntRow${prov?' prov':''}"><span class="lb" title="${esc(src.name)} ${tot}석">${esc(nm)} ${tot}${note}</span><div class="bar">${segL(L,tot)}</div></div>`; }).join('');
+      if(SS){
+        $('#cntSeatBar').innerHTML=srcRows();
+        if(pTot){ const shD= k>=n? new Map(rec.results.map(r=>[r.id, r.seats-(r.pSeats||0)])) : new Map(seatC);
+          const shP= k>=n? pSeats : (counted.length? provPR() : new Map()); shown=new Map(shD); shP.forEach((c,id)=>shown.set(id,(shown.get(id)||0)+c)); }
+        else shown= k>=n? new Map(rec.results.map(r=>[r.id, r.seats])) : new Map(seatC);
+      } else if(pTot){
         // 혼합형 — 지역구와 비례를 두 줄로. 비례는 개표된 지역의 득표로 잠정 배분하다가 개표가 끝나면 공식 결과
         const dTot=T-pTot;
         const shD= k>=n? new Map(rec.results.map(r=>[r.id, r.seats-(r.pSeats||0)])) : new Map(seatC);
@@ -28941,6 +28965,8 @@ Object.assign(UI, {
         const mm=MULTI.get(d);
         if(mm) for(const id in mm) seatC.set(+id,(seatC.get(+id)||0)+mm[id]);
         else seatC.set(w,(seatC.get(w)||0)+1);
+        { const cl=clsOf(mm? Object.values(mm).reduce((a,b)=>a+b,0) : 1); const M=seatByCls.get(cl)||new Map(); seatByCls.set(cl,M);
+          if(mm) for(const id in mm) M.set(+id,(M.get(+id)||0)+mm[id]); else M.set(w,(M.get(w)||0)+1); }
         const sh=SH.get(d)||new Map(), pc=sh.get(w);
         sh.forEach((pct,id)=>acc.set(id,(acc.get(id)||0)+pct));
         const vals=[...sh.values()].sort((a,b)=>b-a), mg=vals.length>1? vals[0]-vals[1] : 99;
