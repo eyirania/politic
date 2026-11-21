@@ -3853,6 +3853,33 @@ function realRegionLean(key, i, src){
 // 체제: EIU 민주주의 지수 2023의 '권위주의 체제'(근사) · 군정(2020년대 쿠데타 정부). 나머지는 민주정으로 본다.
 const WORLD_AUTH=new Set('AFG AGO ARE AZE BDI BFA BHR BLR CAF CHN CMR COD COG COM CUB DJI DZA EGY ERI ETH GAB GIN GNQ HTI IRN IRQ JOR KAZ KGZ KHM KWT LAO LBY MLI MMR MOZ NER NIC OMN PRK QAT RUS RWA SAU SDN SSD SWZ SYR TCD TGO TJK TKM UZB VEN VNM YEM ZWE'.split(' '));
 const WORLD_JUNTA=new Set('MMR MLI BFA NER GIN SDN TCD GAB'.split(' '));
+// 실제 이웃의 처음 관계를 정하는 자료 — 동맹 블록과 오래된 적대 관계(2026년 무렵). 나라별로 손으로 관계값을 넣지 않고,
+// 블록이 같으면 +, 마주 선 블록이면 −, 적대 쌍이면 크게 −, 체제가 같으면 +(민주국가끼리 특히) 하는 일반 규칙으로 계산한다(10-war.js initRealForeign).
+//   west  — NATO + 미국 양자 동맹(한국·일본·필리핀·호주·태국·뉴질랜드)
+//   eu    — 유럽연합(서방 블록과 겹친다 — 추가 우호)
+//   east  — 집단안보조약기구 + 중국·북한·러시아 조약 축
+//   gcc   — 걸프협력회의
+// 적대 쌍은 '전략적 경쟁 관계'(톰프슨·드라이어의 목록 중 지금도 이어지는 것)와 최근 무력 충돌을 겪은 짝
+const WORLD_BLOCS={
+  west:new Set('USA CAN GBR FRA DEU ITA ESP PRT NLD BEL LUX DNK NOR ISL TUR GRC POL CZE SVK HUN ROU BGR HRV SVN ALB MNE MKD EST LVA LTU FIN SWE KOR JPN PHL AUS NZL THA'.split(' ')),
+  eu:new Set('AUT BEL BGR HRV CYP CZE DNK EST FIN FRA DEU GRC HUN IRL ITA LVA LTU LUX MLT NLD POL PRT ROU SVK SVN ESP SWE'.split(' ')),
+  east:new Set('RUS BLR KAZ KGZ TJK CHN PRK'.split(' ')),
+  gcc:new Set('SAU ARE KWT QAT BHR OMN'.split(' ')),
+};
+const WORLD_BLOC_RIVAL=[['west','east']];
+const WORLD_RIVALS=new Set(['KOR-PRK','IND-PAK','CHN-IND','CHN-TWN','CHN-JPN','CHN-USA','CHN-PHL','CHN-VNM','RUS-UKR','RUS-GEO','RUS-USA','ARM-AZE','GRC-TUR','CYP-TUR',
+  'IRN-ISR','ISR-SYR','ISR-LBN','IRN-SAU','IRN-USA','PRK-USA','JPN-PRK','GUY-VEN','COL-VEN','ERI-ETH','SDN-SSD','DZA-MAR','AFG-PAK','KHM-THA','EGY-ETH','RUS-POL','LTU-RUS','EST-RUS','LVA-RUS','RUS-FIN',
+  'SRB-XKX','RWA-COD','IRQ-KWT','ISR-PSE','BOL-CHL']);
+function worldRival(a,b){ return WORLD_RIVALS.has(a<b? a+'-'+b : b+'-'+a); }
+// 두 나라의 구조적 관계(−1 ~ +1) — 블록·적대·체제
+function worldRel0(a, b, demA, demB){
+  let r=0.1 + (demA&&demB? 0.15 : (demA!==demB)? -0.15 : 0.05);
+  const inB=x=>Object.keys(WORLD_BLOCS).filter(k=>WORLD_BLOCS[k].has(x)), A=inB(a), B=inB(b);
+  if(A.some(k=>B.includes(k))) r+= A.includes('eu')&&B.includes('eu')? 0.55 : 0.45;
+  for(const [p,q] of WORLD_BLOC_RIVAL) if((A.includes(p)&&B.includes(q))||(A.includes(q)&&B.includes(p))) r-=0.3;
+  if(worldRival(a,b)) r-=0.95;
+  return Math.max(-1, Math.min(1, r));
+}
 const _wLL={}, _wBB={};
 // 구역 경계 → 위경도 고리
 function atomLL(key, i){ const k=key+'@'+i; if(_wLL[k]) return _wLL[k]; const X=cuGet(key); if(!X || !X.F) return [];
@@ -3885,8 +3912,9 @@ function worldNeighbors(atoms, maxN){
   for(const o of L){ o.prov=[]; o.pop=0; o.gdp=0;   // 그 나라 전부(멀리 떨어진 덩어리까지) — 국력
     for(const k in WORLD_ADM){ if(k.replace(/_\d+$/,'')!==o.base) continue; WORLD_ADM[k].r.forEach((r,i)=>{ if(own.has('w:'+k+'@'+i)) return; o.prov.push(['w:'+k,i]); o.pop+=r[1]||0; o.gdp+=(r[1]||0)*(r[3]||1); }); }
     if(!o.land) o.front=new Set([...o.front]); }
-  // 인구 10만 명 아래(리히텐슈타인·모나코 …)는 뺀다. 땅 이웃 먼저, 그다음 경제 규모 순
-  return L.filter(o=>o.prov.length && o.pop>=0.1).sort((a,b)=>(b.land-a.land)||(b.gdp-a.gdp)||(a.sea-b.sea)).slice(0, maxN||8);
+  // 인구 10만 명 아래(리히텐슈타인·모나코 …)는 뺀다. 땅 이웃은 모두(작아도 국경을 맞댄 나라가 분쟁 상대가 되기 쉽다, 10곳까지), 바다 이웃은 경제 규모 순으로 maxN까지 채운다
+  const K=L.filter(o=>o.prov.length && o.pop>=0.1).sort((a,b)=>(b.land-a.land)||(b.gdp-a.gdp)||(a.sea-b.sea)), nL=K.filter(o=>o.land).length;
+  return K.slice(0, Math.max(maxN||8, Math.min(10, nL)));
 }
 
 // ════════ 역사 묶음표 — 지금의 1급(·2급) 행정구역을 옛 행정 구역·역사적 나라로 묶는다 ════════
@@ -5105,7 +5133,7 @@ class Sim {
     {fn:'_sysNameCulture', every:12, save:['nameStyle','_nameBase']},
     {fn:'stepParties', every:6}, {fn:'_sysAccommodate', every:6},
     {fn:'stepSchism', flag:'schismOn', save:['schisms','_schLog','_schSeq']},
-    {fn:'_sysWar', every:12, save:['milZones','pendingOcc','regVoteW','origin','_originNames','_natPop','_cuSeed','_lostFrac']},   // 실제 이웃·점령지(10-war.js)
+    {fn:'_sysWar', every:12, save:['milZones','pendingOcc','regVoteW','origin','_originNames','_natPop','_cuSeed','_lostFrac','_customSpec']},   // 실제 이웃·점령지(10-war.js)
     {fn:'_sysValenceDecay', every:12, save:['_presPact']},
     {fn:'_sysGovRep', every:12, save:['govRep','_repKey','_repLead']},
     {fn:'_challengerEntry', every:3, save:['_lastChallenger','_entryPressure','_lastNewAxisTick']},
@@ -18326,9 +18354,12 @@ class Sim {
       const K=this.tune.distPoolK??6, adj=this._distAdjacency(dTally.length);
       const tot=dTally.map(t=>{ let n=0; t.forEach(v=>{ if(v>0) n+=v; }); return n; });
       const shr=dTally.map((t,d)=>{ const m=new Map(); if(tot[d]>0) t.forEach((v,k)=>{ if(v>0) m.set(k,v/tot[d]); }); return m; });
-      const pooled=dTally.map((t,d)=>{ const nb=adj[d]||[]; if(!nb.length || tot[d]<=0) return null; let W=0; const nm=new Map();
+      // 표가 하나도 없는 선거구(시민 표본이 작아 그 동네 투표자가 0명)는 이웃 선거구 비율로 1표만큼 추정한다 — 예전엔 당선자 없이 남아
+      // 그 의석이 전국 득표 순으로 채워져, 순수 소선거구제인데 '비례 1석'이 생겼다
+      const pooled=dTally.map((t,d)=>{ const nb=adj[d]||[]; if(!nb.length) return null; let W=0; const nm=new Map();
         for(const [e,w] of nb){ if(tot[e]<=0) continue; W+=w; shr[e].forEach((v,k)=>{ if(k!==-2) nm.set(k,(nm.get(k)||0)+v*w); }); }   // 무소속은 그 후보 개인의 표라 이웃에 번지지 않는다
-        if(W<=0) return null; const o=new Map(); t.forEach((v,k)=>{ if(v>0) o.set(k,v); }); nm.forEach((v,k)=>o.set(k,(o.get(k)||0)+K*v/W));
+        if(W<=0) return null; if(tot[d]<=0){ const o=new Map(); nm.forEach((v,k)=>o.set(k,v/W)); return o; }
+        const o=new Map(); t.forEach((v,k)=>{ if(v>0) o.set(k,v); }); nm.forEach((v,k)=>o.set(k,(o.get(k)||0)+K*v/W));
         const z=[...o.values()].reduce((a,b)=>a+b,0)||1; o.forEach((v,k)=>o.set(k,v/z*tot[d])); return o; });
       pooled.forEach((o,d)=>{ if(!o) return; dTally[d].clear(); o.forEach((v,k)=>dTally[d].set(k,v)); });
     }
@@ -24193,12 +24224,15 @@ class Sim {
     const names=['베르가','칸토스','노르덴','아실리아','타반'];
     const regs=['DEM','DEM','AUTH','AUTH','MIL'];
     this.foreign=[];
+    // 오랜 적대국 하나 — 실제 나라들처럼(07-custom.js WORLD_RIVALS) 비민주 이웃 가운데 하나와 구조적으로 사이가 나쁘다
+    const rv=2+((this._fR()*3)|0);
     for(let k=0;k<5;k++){
+      const rel0= k===rv? clamp(this._fG(-0.8,0.12),-1,-0.5) : this._fG(0.1,0.35);
       this.foreign.push({
         name:names[k], regime:regs[k],
         power: 0.4+this._fR()*0.9,
         ideo: this._fG(0,0.9),               // 이념 위치(우리 LR과 비교)
-        rel: this._fG(0.1,0.35),             // -1 적대 ~ +1 동맹
+        rel: rel0, rel0, rival:k===rv,       // -1 적대 ~ +1 동맹, rel0 = 돌아오는 구조적 관계
         trade: 0.08+this._fR()*0.22,           // 무역 의존도
         ally:false, sanction:false,
       });
@@ -24218,7 +24252,9 @@ class Sim {
       // 체제 유사성(민주평화론) + 노선 + 이념 거리
       const demMatch = (ourDem === (f.regime==='DEM'))? 0.004 : -0.003;
       const ideoGap = Math.abs((lead? this.lr(lead.cent):0) - f.ideo);
-      f.rel = clamp(f.rel + demMatch + (dovish-0.5)*0.006 - ideoGap*0.0015 + this._fG(0,0.004), -1, 1);
+      // 구조적 관계(rel0 — 실제 이웃은 동맹·적대 자료, 가상 이웃은 처음 값)로 천천히 돌아온다. 정부 노선·체제·이념은 그 둘레에서 밀고 당긴다
+      if(f.rel0==null) f.rel0=f.rel;
+      f.rel = clamp(f.rel + demMatch + (dovish-0.5)*0.006 - ideoGap*0.0015 + 0.02*(f.rel0-f.rel) + this._fG(0,0.004), -1, 1);
       if(f.sanction) f.rel=clamp(f.rel-0.004,-1,1);
       // 상대국 체제 변동
       if(this._fR()<0.0012){
@@ -24285,10 +24321,19 @@ class Sim {
     }
     // 난민 유입 → 이민 압력
     if(refugee>0) S.migration=clamp(S.migration+refugee*0.004,0,1);
-    // 전쟁 발발
-    if(this.warOn && !this.war && threat>1.1 && this._fR()<0.006){
-      const enemy=this.foreign.filter(f=>f.rel<-0.5).sort((a,b)=>a.rel-b.rel)[0];
-      if(enemy) this._startWar(enemy);
+    // 전쟁 발발 — 나라 하나씩(쌍 단위). 예전엔 적대국 위협의 합이 1.1을 넘어야 했는데, 이웃이 둘셋뿐인 실제 나라는 그 합에 닿지 못해 전쟁이 나지 않았다.
+    //   적대도 H = (−관계 − 0.45)/0.55 (관계 −0.45 아래부터 0→1)
+    //   그쪽이 칠 힘 = 상대 국력(우리 대비), 우리가 칠 힘 = 매파 정도 × 상대가 약할수록(최대 3배) × 0.5
+    //   매파 = 집권당 부족주의(민족주의)↑·개방성↓ + 군부 영향력 + 비민주 체제
+    //   민주국가끼리는 0.15배(민주평화론). 분기마다 확률 0.004 × H × (그쪽 힘 + 우리 힘)
+    //   그쪽이 우리 국토에 땅을 잃었으면(실지, 10-war.js _foreignClaims) 그쪽 힘 × (1 + 1.5g) — 되찾으려는 쪽이 먼저 친다
+    if(this.warOn && !this.war){
+      const L=this.leadParty, reg=this.regime;
+      const hawk=clamp((L? 0.5+0.5*(L.cent[3]||0)-0.3*(L.cent[0]||0) : 0.4) + (this.milInfluence||0)/100*0.3 + (reg==='MIL'? 0.35 : (reg==='ONE'||reg==='AUTH')? 0.2 : 0), 0, 1.6);
+      for(const f of this.foreign){ if(f.puppet || f.rel>=-0.45) continue;
+        const H=clamp((-f.rel-0.45)/0.55, 0, 1), they=f.power*(1+1.5*clamp((f.claim||0)/0.3,0,1)), we=hawk*Math.min(3, 1/Math.max(0.1,f.power))*0.5;
+        const peace=(ourDem && f.regime==='DEM')? 0.15 : 1;
+        if(this._fR() < 0.004*H*(they+we)*peace){ this._startWar(f); break; } }
     }
     if(this.war) this._stepWar();
     if(this._stepMilZones) this._stepMilZones();
@@ -24379,14 +24424,37 @@ class Sim {
     const NA=this.nationAtoms(); if(!NA || !NA.length) return false;
     const NB=worldNeighbors(NA, 6); if(!NB.length) return false;
     const us=this._gdpOf(NA);
+    // 우리 나라 코드 — 국토 인구가 가장 많은 원래 나라(조립 국가도 그 나라의 동맹·적대를 이어받는다)
+    const byB=new Map(); for(const a of NA){ const b=String(a.key).replace(/^w2?:/,'').replace(/[_:].*$/,''), row=(cuGet(a.key).D||[])[a.i]; byB.set(b,(byB.get(b)||0)+((row&&row[1])||0)); }
+    const home=[...byB.entries()].sort((x,y)=>y[1]-x[1])[0]?.[0]||'', ourDem=!['AUTH','MIL','ONE'].includes(this.regime);   // 처음 만들 때는 체제가 아직 안 정해졌을 수 있다 — 독재가 아니면 민주로
+    this._homeBase=home;
     this.foreign=NB.map(o=>{ const reg= WORLD_JUNTA.has(o.base)? 'MIL' : WORLD_AUTH.has(o.base)? 'AUTH' : 'DEM';
-      return { name:o.name, regime:reg, real:true, base:o.base, land:!!o.land,
+      // 처음 관계 = 구조적 관계(동맹 블록·적대 쌍·체제 — 07-custom.js worldRel0) + 작은 잡음. 관계는 이 값으로 천천히 돌아온다(rel0)
+      const rel0=worldRel0(home, o.base, ourDem, reg==='DEM');
+      return { name:o.name, regime:reg, real:true, base:o.base, land:!!o.land, relBase:rel0,
         power: clamp(0.75*Math.pow(o.gdp/Math.max(1e-6,us.g),0.4), 0.12, 3.5),
-        ideo: this._fG(0,0.9), rel: this._fG(0.1,0.3) + (reg==='DEM'? 0.05 : -0.05),
+        ideo: this._fG(0,0.3), rel: clamp(rel0+this._fG(0,0.08),-1,1), rel0, rival:worldRival(home,o.base),
         trade: clamp(0.04+0.25*Math.pow(o.gdp/Math.max(1e-6,us.g),0.3)*(o.land?1:0.7), 0.04, 0.4),
         ally:false, sanction:false, pop:o.pop, front:[...o.front] }; });
     this._natPop=us.p;
+    this._foreignClaims(true);
     return true;
+  }
+  // 잃은 땅(실지) — 그 나라 사람 중 우리 국토에 사는 몫. 조립 국가가 이웃 나라 땅을 품고 있으면(편입한 뒤에도) 그 나라는 되찾고 싶어한다.
+  //   불만 g = 몫 ÷ 0.3(30%를 잃으면 최대). 구조적 관계(동맹 블록·적대 쌍)를 g만큼 지우고 −0.8 쪽으로 끌어내린다(rel0) — 같은 블록이어도 땅을 뺏긴 나라는 동맹이 아니다
+  //   전쟁 확률에서 그쪽이 칠 힘도 (1 + 1.5g)배(10-foreign.js)
+  _foreignClaims(init){
+    const NA=this.nationAtoms(); if(!NA || !this.foreign) return;
+    const ours=new Map(), own=new Set(); for(const a of NA){ const b=String(a.key).replace(/^w2?:/,'').replace(/[_:].*$/,''), row=(cuGet(a.key).D||[])[a.i]; ours.set(b,(ours.get(b)||0)+((row&&row[1])||0)); own.add(a.key+'@'+a.i);
+      if(String(a.key).startsWith('w2:')){ const T=_cuTable(a.key), q=T && T.par && T.par[a.i]; if(q) own.add('w:'+q[0]+'@'+q[1]); } }
+    for(const f of this.foreign){ if(!f.real || !f.base) continue; const mine=ours.get(f.base)||0;
+      let rest=0; for(const k in WORLD_ADM){ if(k.replace(/_\d+$/,'')!==f.base) continue; WORLD_ADM[k].r.forEach((r,i)=>{ if(!own.has('w:'+k+'@'+i)) rest+=r[1]||0; }); }
+      const claim= mine>0? mine/(mine+rest) : 0, g=clamp(claim/0.3,0,1), was=f.claim||0;
+      f.claim=+claim.toFixed(3); f.pop=rest;
+      const base= f.relBase??f.rel0??0, r0=+(base*(1-g) - 0.8*g).toFixed(3);
+      if(init) f.rel=clamp(f.rel+(r0-(f.rel0??base)),-1,1);   // 처음 잡음은 그대로 두고 기준점만 옮긴다
+      else if(claim>was+0.01) f.rel=clamp(f.rel-0.3*(g-clamp(was/0.3,0,1)),-1,1);
+      f.rel0=r0; }
   }
   // 점령 상태에서 지역마다 잃은 인구 몫 — 절반을 넘으면 투표하지 못한다
   _warLostFrac(){
@@ -24541,6 +24609,7 @@ class Sim {
     const popMul=sel.map(([k,i])=>pm.get(k+'@'+i)||1), seed=(this._cuSeed!=null? this._cuSeed : 7);
     const w=applyCustomWorld(sel, seed, 0.60, popMul, merges); if(!w || NREG!==oldN+groups.length){ this.pushNews(3,'norm','편입 실패 — 국토를 다시 짓지 못했다'); return false; }
     const newN=NREG;
+    this._foreignClaims(false);   // 편입한 나라는 잃은 땅이 늘었다
     // 지역별 배열 늘리기 — 형식 배열(길이 = 옛 지역 수)은 모두, 일반 배열은 아는 것만
     const LIST=['localIssues','_regPsy','_regIdent','_stateLean','_senStateSeats'];
     for(const [k,v] of Object.entries(this)){
@@ -25435,7 +25504,8 @@ const UI={
       const b=$('#btnPause'); if(b){ b.textContent=this.paused?'▶ 재생':'⏸ 일시정지'; b.classList.toggle('active',this.paused); } };
     $('#btnSave').onclick=()=>{
       try{
-        const json=this.sim.serialize();
+        let json=this.sim.serialize();
+        try{ const R=this._worldRecipe && this._worldRecipe(); if(R) json=json.slice(0,-1)+',"uiWorld":'+JSON.stringify(R)+'}'; }catch(e){}   // 국토 조리법(59-share.js)
         const sz=(json.length/1024).toFixed(0);
         const safe=(this.sim.country||'polis').replace(/[^\w가-힣-]/g,'_').slice(0,20);
         const stamp=new Date().toISOString().slice(0,10);
@@ -25452,8 +25522,13 @@ const UI={
       const f=e.target.files[0]; if(!f)return;
       const r=new FileReader();
       r.onload=()=>{ try{
+          // 국토 먼저 — 저장할 때의 국토(지역 수·경계·이름)로 다시 짓고 나서 시민을 되살린다. 예전 파일(국토 없음)은 지역 수가 다르면 그 수로 기본 지도를 만든다
+          let R=null, nreg=0; try{ const d0=JSON.parse(r.result); R=d0.uiWorld||null; nreg=(d0.C && d0.C.region && d0.C.region.length)? 1+Math.max(...d0.C.region) : 0; }catch(e2){}
+          let wOK=false; if(R && this._applyWorldRecipe) wOK=this._applyWorldRecipe(R);
           const ns=Sim.deserialize(r.result);
-          this.sim=ns; this._parlKey=''; this._newsDirty=true; this.paused=true;
+          this.sim=ns; this._parlKey=''; this._plOrder=null; this._citIdx=-1; this._newsDirty=true; this.paused=true;
+          if(wOK || R){ this.buildMap && this.buildMap(); }
+          if(!R && nreg && nreg>NREG) this.sim.pushNews(2,'norm','<b>예전 저장 파일</b> — 국토 정보가 없어 지도가 맞지 않을 수 있다');
           this.sim.pushNews(2,'pos',`<b>백업 불러오기 완료</b> — ${this.sim.country}, ${this.sim.year()}년`);
           this.render(true);
         }catch(err){ alert('불러오기 실패: 파일이 손상됐거나 형식이 맞지 않습니다.\n('+err.message+')'); } };
@@ -26793,6 +26868,7 @@ Object.assign(UI, {
           <div style="position:absolute;left:${pos}%;top:-1px;transform:translateX(-50%);width:8px;height:10px;border-radius:3px;background:${rc}"></div></div>
         <span style="font-family:var(--mono);font-size:9.5px;color:${rc};min-width:38px;text-align:right">${f.rel.toFixed(2)}</span>
         ${f.ally?'<span style="font-size:9px;color:#5ae0b4">동맹</span>':''}
+        ${f.claim>=0.02? `<span style="font-size:9px;color:#ffb24d" title="그 나라 사람 ${(f.claim*100).toFixed(0)}%가 우리 국토에 산다 — 되찾고 싶어한다(관계 기준점↓ · 먼저 칠 가능성↑)">실지 ${(f.claim*100).toFixed(0)}%</span>`:''}
         ${f.sanction?'<span style="font-size:9px;color:var(--rd)">제재</span>':''}
         ${f.real? `<span class="mut10" title="국력 = 0.75 × (그 나라 경제 규모 ÷ 우리)^0.4 · ${f.land? '땅으로 맞닿음' : '바다 건너'}">${f.land? '⛰' : '🌊'} ${f.power.toFixed(2)}</span>` : ''}
         ${f.real && !s.war && !f.puppet? `<button class="cOpt" data-fwar="${F.indexOf(f)}" style="padding:1px 6px;font-size:10px" title="선전포고 — 민주국가들과 관계가 나빠진다">⚔</button>` : ''}
@@ -31631,10 +31707,10 @@ Object.assign(UI, {
     $('#cntSkip').textContent='건너뛰기 ▶▶';
     const order=s.countOrder(rec), n=order.length;
     // 칸 칠하기 — 반짝임은 CSS 애니메이션, 뒤집힌 곳은 노란 테두리를 남긴다
-    const paint=(d, flip)=>{ if(!MAP) return; const L=MAP.byD.get(d); if(!L) return;
+    const paint=(d, flip)=>{ if(!MAP){ if(paintRG) paintRG1(d); return; } const L=MAP.byD.get(d); if(!L) return;
       for(const el of L){ el.setAttribute('fill', el.dataset.c); el.setAttribute('opacity', el.dataset.o); el.classList.remove("hxNew"); void el.getBoundingClientRect(); el.classList.add("hxNew"); }
       if(flip){ const b=MAP.hi.querySelector(`[data-db="${d}"]`); if(b){ b.removeAttribute('display'); b.classList.add('hxFlip'); } } };
-    const paintAll=()=>{ if(!MAP) return; for(const [d] of MAP.byD) if(!paintedD.has(d)){ paintedD.add(d); paint(d, false); } };
+    const paintAll=()=>{ if(!MAP){ if(paintRG) for(const [d] of rec.dWin) if(!paintedD.has(d)){ paintedD.add(d); paint(d, false); } return; } for(const [d] of MAP.byD) if(!paintedD.has(d)){ paintedD.add(d); paint(d, false); } };
     const paintedD=new Set();
     const W=new Map(rec.dWin.map(([d,w])=>[d,w]));
     const MULTI=new Map((rec.dMulti||[]).map(([d,m])=>[d,m]));
@@ -31645,6 +31721,15 @@ Object.assign(UI, {
     const info=id=>{ const r=rec.results.find(x=>x.id===id); const p=s.parties.find(q=>q.id===id);
       return {name:(r&&r.name)||(p&&p.name)||(id===-2?'무소속':'?'), color:(p&&p.color)||(r&&r.color)||'#888'}; };
     const nmD=d=>s.districtName? s.districtName(d) : '제'+d+'구';
+    // 벌집을 못 깔면(국토 모양 배치가 없거나 이번 선거구와 안 맞으면) 지역 지도로 — 지역 색 = 그 지역에서 지금까지 선거구를 가장 많이 이긴 정당, 진하기 = 개표율
+    let paintRG=null; const rgOf=new Map(), rgTot=new Map(), rgWin=new Map(), rgCnt=new Map(), RSf=new Map();
+    if(!MAP && rec.dWin.length){ for(const [d,,reg] of rec.dWin){ if(reg==null) continue; rgOf.set(d,reg); rgTot.set(reg,(rgTot.get(reg)||0)+1); if(!RSf.has(reg)) RSf.set(reg,[]); }
+      const rn1=r=>(typeof REGION_NAMES!=='undefined' && REGION_NAMES[r])? REGION_NAMES[r] : '제'+(r+1)+'지역';
+      paintRG=this._cntRegionMap(mapBox, RSf, info, rn1, '지역 색 = 그 지역에서 지금까지 선거구를 가장 많이 이긴 정당 · 진하기 = 개표율 · 반짝 = 개표 완료');
+      if(paintRG.ok) $('#countCard').classList.add('wide'); else paintRG=null; }
+    const paintRG1=d=>{ const r=rgOf.get(d); if(r==null) return; const w=W.get(d); rgCnt.set(r,(rgCnt.get(r)||0)+1);
+      const M=rgWin.get(r)||new Map(); if(w!=null && w>-1) M.set(w,(M.get(w)||0)+1); rgWin.set(r,M);
+      RSf.set(r,[...M.entries()].sort((a,b)=>b[1]-a[1])); paintRG(r, rgCnt.get(r)/Math.max(1,rgTot.get(r))); };
     $('#cntTitle').textContent=`${rec.y}년 총선 개표 중계`;
     $('#cntSub').textContent=`${METHODNAME[rec.method]||rec.method} · 선거구 ${n}곳${MULTI.size? ` (${Math.round((T-pTot)/Math.max(1,n))}인 선거구)` : ''}${pTot? ` + 비례 ${pTot}석` : ''} · 과반 ${need}석`;
     const counted=[], seatC=new Map(), feed=[]; this._cntFlipAt=null;
@@ -35116,6 +35201,28 @@ Object.assign(UI, {
     try{ navigator.clipboard.writeText(url).then(done, ()=>{ prompt('이 주소를 복사하자', url); }); }catch(e){ try{ prompt('이 주소를 복사하자', url); }catch(_){} }
     return url;
   },
+  // 저장 파일에 담는 국토 조리법 — 시민·정당은 저장 파일이 담지만 국토(지도 경계·지역 이름·특성)는 화면 쪽 전역이라 빠져 있었다.
+  // 다른 국토를 띄운 채 불러오면 지도·개표 지도·전쟁 이웃이 어긋났다. 지금 국토를 다시 만드는 방법(공유 주소와 같은 재료)과 지역 이름·특성을 함께 담는다
+  _worldRecipe(){
+    const s=this.sim, st=Object.assign({}, this._start||{path:'intro', res:-1}); delete st.flags; delete st.traitsFull;
+    let w=this._world? JSON.parse(JSON.stringify(this._world)) : null;
+    if(s && s._customSpec){ w=Object.assign(w||{}, {custom:JSON.parse(JSON.stringify(s._customSpec)), seed:s._cuSeed!=null? s._cuSeed : (w&&w.seed), lr:(w&&w.lr)||0.6}); st.path='custom'; }   // 편입으로 늘어난 국토까지
+    return {st, w, n:NREG, names:REGION_NAMES.slice(0,NREG), traits:JSON.parse(JSON.stringify(REGION_TRAITS.slice(0,NREG)))};
+  },
+  _applyWorldRecipe(R){
+    if(!R || !R.n) return false;
+    const st=R.st||{}, w=R.w;
+    try{
+      if(st.path==='custom' && w && w.custom && typeof applyCustomWorld==='function') applyCustomWorld(w.custom.sel, w.seed, w.lr||0.6, (w.custom.lean||[]).map(x=>x && x.pop || 1), w.custom.merges||[]);
+      else if(st.path==='preset-regen' && w && w.real && typeof applyRealWorld==='function') applyRealWorld(w.real, w.seed, w.lr||0.6);
+      else applyGeneratedWorld(R.n, (w && w.n===R.n && w.seed!=null)? w.seed : 20260806, (w && w.lr)||0.58);
+    }catch(e){ return false; }
+    if(NREG!==R.n) return false;
+    (R.traits||[]).forEach((t,i)=>{ if(REGION_TRAITS[i] && t) Object.assign(REGION_TRAITS[i], t); });
+    (R.names||[]).forEach((nm,i)=>{ REGION_NAMES[i]=nm; });
+    this._world=w; this._start=Object.assign({}, st);
+    return true;
+  },
   applyShare(o){
     // 원래 세계가 만들어진 순서를 그대로 밟는다 — 순서가 다르면 난수 소비가 달라 다른 세계가 된다
     const st=o.st||{path:'intro', res:-1};
@@ -35294,7 +35401,7 @@ Object.assign(UI, {
 
 // ════════ 나라 조립기 — 실제 지역을 골라 새 나라를 만들고, 지역마다 정치 성향을 넣는다 ════════
 // 왼쪽: 나라를 고르고 지도에서 지역을 눌러 넣고 뺀다(여러 나라를 섞을 수 있다). 오른쪽: 조립된 나라 —
-// 지역을 눌러(Shift로 여럿) 성향을 넣는다. 4축(경제·사회·포퓰리즘·민족주의) + 지역 정체성, 펼치면 6축 직접.
+// 지역을 눌러(누를 때마다 더하고 빼며 여럿) 성향을 넣는다. 4축(경제·사회·포퓰리즘·민족주의) + 지역 정체성, 펼치면 6축 직접.
 // 제도(지금 헌법 · 프리셋의 제도)와 정당(처음부터 저절로 · 프리셋의 정당 구도)을 고르고 세운다.
 Object.assign(UI, {
   _bldAxes:[['e','경제','좌','우'],['g','사회','진보','보수'],['p','포퓰리즘','제도','반엘리트'],['n','민족주의','개방','민족']],
@@ -35370,7 +35477,7 @@ Object.assign(UI, {
       pg.innerHTML=`<div id="bldCard"><div style="display:flex;align-items:center;gap:10px"><h2 style="flex:1">🧩 나라 조립</h2><button class="btn" id="bldClose">닫기</button></div>
         <div class="elSub">실제 지역을 골라 새 나라를 만든다. 여러 나라를 섞어도 된다 — 멀리 떨어진 덩어리는 섬처럼 가까이 붙는다. 지역마다 정치 성향을 이념 좌표로 넣는다(값은 '평소보다 얼마나 그쪽인가').</div>
         <div class="bldGrid"><div class="bldBox"><h4>① 지역 고르기</h4><div id="bldPickTop"></div><div class="bldMap" id="bldSrc"></div><div class="mut10" id="bldSrcHint" style="margin-top:4px"></div></div>
-          <div class="bldBox"><h4>② 조립된 나라 — 지역을 눌러 성향 넣기(Shift로 여럿)</h4><div id="bldAxisBar"></div><div class="bldMap" id="bldOut"></div><div class="bldChips" id="bldChips"></div></div></div>
+          <div class="bldBox"><h4>② 조립된 나라 — 지역을 눌러 성향 넣기(누를 때마다 더하고 빼기, 빈 곳을 누르면 모두 풀기)</h4><div id="bldAxisBar"></div><div class="bldMap" id="bldOut"></div><div class="bldChips" id="bldChips"></div></div></div>
         <div class="bldGrid"><div class="bldBox" id="bldEdit"></div><div class="bldBox" id="bldSet"></div></div></div>`;
       document.body.appendChild(pg);
       pg.querySelector('#bldClose').onclick=()=>pg.classList.remove('show');
@@ -35467,9 +35574,9 @@ Object.assign(UI, {
     const tog=(u, multi)=>{ const ks=this._bldUKeys(G,u), all=ks.every(k=>B.pick.has(k));
       if(multi){ ks.forEach(k=>all? B.pick.delete(k) : B.pick.add(k)); } else { const only=all && B.pick.size===ks.length; B.pick.clear(); if(!only) ks.forEach(k=>B.pick.add(k)); }
       this._bldRenderOut(); this._bldRenderEdit(); };
-    box.querySelector('svg').onclick=e=>{ const p=e.target.closest('[data-bu]'); if(!p) return; tog(+p.dataset.bu, e.shiftKey || e.metaKey || e.ctrlKey); };
+    box.querySelector('svg').onclick=e=>{ const p=e.target.closest('[data-bu]'); if(!p){ if(B.pick.size){ B.pick.clear(); this._bldRenderOut(); this._bldRenderEdit(); } return; } tog(+p.dataset.bu, true); };   // 누를 때마다 더하고 뺀다(여럿 고르기)
     const chips=document.getElementById('bldChips');
-    chips.innerHTML=G.names.map((nm,u)=>`<span class="bldChip${upick(u)?' on':''}" data-bu="${u}" title="누르면 고르기 · 두 번 누르면 빼기">${nm}${G.units[u].js.length>1? ` <span style="opacity:.6">(${G.units[u].js.length})</span>` : ''}</span>`).join('');
+    chips.innerHTML=G.names.map((nm,u)=>`<span class="bldChip${upick(u)?' on':''}" data-bu="${u}" title="누를 때마다 고르기와 풀기, 두 번 빠르게 누르면 나라에서 빼기">${nm}${G.units[u].js.length>1? ` <span style="opacity:.6">(${G.units[u].js.length})</span>` : ''}</span>`).join('');
     chips.onclick=e=>{ const c=e.target.closest('[data-bu]'); if(!c) return; tog(+c.dataset.bu, true); };
     chips.ondblclick=e=>{ const c=e.target.closest('[data-bu]'); if(!c) return; const ks=new Set(this._bldUKeys(G,+c.dataset.bu));
       B.sel=B.sel.filter(([a,b])=>!ks.has(this._bldKey(a,b))); ks.forEach(k=>B.pick.delete(k)); this._bldPrune(); this._bldGeo=null; this._bldRender(); };
