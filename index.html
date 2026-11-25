@@ -554,6 +554,20 @@ body.noMapLbl .mLbl{display:none}
 .cntRow>.bar{flex:1;display:flex;height:20px;border-radius:5px;overflow:hidden;background:rgba(255,255,255,0.06)}
 .cntRow>.bar>div{transition:width .15s;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;text-shadow:0 1px 2px #0009;white-space:nowrap;overflow:hidden}
 .cntRow.prov>.bar>div{opacity:1}
+#cntGfx{margin-top:8px;border:1px solid rgba(130,170,255,0.22);border-radius:8px;padding:6px 8px;background:rgba(20,32,60,0.55);min-height:0}
+#cntGfx:empty{display:none}
+#cntGfx .gfxTabs{display:flex;gap:3px;align-items:center;margin-bottom:5px;flex-wrap:wrap}
+#cntGfx .gfxTab{font-size:10.5px;padding:2px 7px;border-radius:4px;border:1px solid rgba(130,170,255,0.25);background:transparent;color:var(--tx3);cursor:pointer}
+#cntGfx .gfxTab.on{background:#1d4ed8;color:#fff;border-color:#1d4ed8}
+#cntGfx .gfxPin{margin-left:auto;font-size:11px;color:var(--tx3)}
+#cntGfx .gfxH{font-size:12px;font-weight:700;margin:1px 0 4px 0;color:#ffd166}
+#cntGfx .gfxRow{display:flex;align-items:center;gap:6px;font-size:11px;margin:3px 0}
+#cntGfx .gfxNm{width:92px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+#cntGfx .gfxBar{flex:1;position:relative;height:14px;background:rgba(255,255,255,0.05);border-radius:3px}
+#cntGfx .gfxNum{width:30px;text-align:right}
+#cntGfx .gfxRow span b,#cntGfx .gfxTag{filter:brightness(1.45) saturate(1.1)}
+#cntGfx .gfxRng{width:46px;text-align:right;font-size:10px;color:var(--tx3)}
+#cntGfx .gfxTag{width:58px;font-size:10px;font-weight:700;text-align:right}
 #cntFeed{font-size:11.5px;line-height:1.7;min-height:118px;margin-top:6px;border-top:1px solid rgba(130,170,255,0.14);padding-top:6px}
 #cntFeed .row{animation:fadeIn .3s}
 #cntBtns{display:flex;gap:8px;margin-top:10px}
@@ -16392,7 +16406,7 @@ class Sim {
     const pEst=new Map();
     if(pTotal>0){ let tot=0; avg.forEach(v=>tot+=v); if(tot>0) avg.forEach((v,id)=>pEst.set(id, pTotal*v/tot)); }
     const T=rec.total||this.totalSeats||300, need=Math.floor(T*(this.con.majority||0.5))+1;
-    const first=new Map(), maj=new Map(), meanSeats=new Map();
+    const first=new Map(), maj=new Map(), meanSeats=new Map(), draws=new Map(), dWin=new Map();   // draws: 정당 → 판마다 의석(예상 범위), dWin: 남은 선거구 → 정당별 승리 횟수(경합 예상)
     const cand=[...ids];
     for(let k=0;k<sims;k++){
       const seats=new Map(base);
@@ -16407,13 +16421,18 @@ class Sim {
           if(v>bv){ bv=v; best=id; }
         }
         seats.set(best,(seats.get(best)||0)+1);
+        { let M=dWin.get(d); if(!M){ M=new Map(); dWin.set(d,M); } M.set(best,(M.get(best)||0)+1); }
       }
       pEst.forEach((v,id)=>seats.set(id,(seats.get(id)||0)+v));
+      seats.forEach((v,id)=>{ if(!draws.has(id)) draws.set(id,[]); draws.get(id).push(v); });
       let top=null, tv=-1; seats.forEach((v,id)=>{ meanSeats.set(id,(meanSeats.get(id)||0)+v/sims); if(v>tv){ tv=v; top=id; } });
       first.set(top,(first.get(top)||0)+1/sims);
       seats.forEach((v,id)=>{ if(v>=need) maj.set(id,(maj.get(id)||0)+1/sims); });
     }
-    return { f, need, T, first, maj, meanSeats, sigma };
+    // 예상 범위 — 판들의 10~90% 구간(방송사 '예상 의석 ○○~○○석')
+    const range=new Map(); draws.forEach((L,id)=>{ while(L.length<sims) L.push(0); L.sort((a,b)=>a-b); range.set(id,[Math.round(L[Math.floor(sims*0.1)]), Math.round(L[Math.min(sims-1,Math.floor(sims*0.9))])]); });
+    const dProb=new Map(); dWin.forEach((M,d)=>{ const P=new Map(); M.forEach((c,id)=>P.set(id,c/sims)); dProb.set(d,P); });
+    return { f, need, T, first, maj, meanSeats, sigma, range, dProb };
   }
 
 
@@ -16470,16 +16489,50 @@ class Sim {
       out.push([r, n, [...c.entries()].sort((a,b)=>b[1]-a[1]).slice(0,6).map(([id,v])=>[id, Math.round(v/n*1000)/10])]); }
     return out;
   }
+  // 결선 재배분 — 탈락한 당 지지자가 두 결선 후보에게 가는 몫 [앞, 뒤]. 나머지는 기권
+  // 보통은 이념이 가까운 쪽으로 85%. 한쪽이 방역선 대상(반체제)이면 이념 거리를 무시하고 반대편으로 몰린다(2002년 프랑스 '공화국 전선')
+  _runoffSplit(p, vr){
+    const T=this.cordonOn&&!this.cordonBroken? (this.cordonTargets||new Set()) : new Set();
+    const t0=T.has(vr[0].id), t1=T.has(vr[1].id);
+    if(t0!==t1){ const safe=t0? 1 : 0, rate=Math.min(0.97, 0.80+0.15*(this.cordonStrength??1)); const w=[0,0]; w[safe]=rate; w[1-safe]=(1-rate)*0.4; return w; }
+    return this.partyDist(p.cent,vr[0])<=this.partyDist(p.cent,vr[1])? [0.85,0] : [0,0.85];
+  }
+  // 결선의 지역별 득표 — 지역마다 탈락 후보 지지자를 같은 규칙으로 나눈다(1차 지역 득표와 다르다: 1차 3위 텃밭은 결선에서 그 당이 기우는 쪽으로 간다)
+  _regionRunoffShares(vr){
+    const out=[], va=this.con.voteAge||18, W=new Map(this.parties.map(p=>[p.id, p.id===vr[0].id? [1,0] : p.id===vr[1].id? [0,1] : this._runoffSplit(p, vr)]));
+    for(let r=0;r<NREG;r++){ let a=0, b=0, n=0;
+      for(let i=0;i<N;i++){ if(this.region[i]!==r||this.party[i]<0||this.age[i]<va) continue; const w=W.get(this.party[i]); if(!w) continue; a+=w[0]; b+=w[1]; n++; }
+      if(n<3 || a+b<=0) continue;
+      out.push([r, n, [[vr[0].id, Math.round(a/(a+b)*1000)/10], [vr[1].id, Math.round(b/(a+b)*1000)/10]]]); }
+    return out;
+  }
   // 직선 대선 — 개표된 지역만 보고 후보 득표율을 추정한다.
   // 지역별 정당 지지를 최종 전국 득표에 맞게 보정해, 다 세면 정확히 최종 결과가 된다.
-  presCountPopular(pr, frac, sims){
+  // 지역 안의 개표 묶음 — 한 지역도 다섯 묶음(투표소 무리)으로 나눠 센다. 묶음마다 구성이 달라(먼저 오는 사전투표·농촌 투표소가 한쪽에 쏠린다)
+  // 지역 안 선두가 개표 도중 바뀔 수 있다. 묶음 편차는 묶음끼리 합이 0이라 다 세면 정확히 그 지역 최종 득표다.
+  // 편차 = (전국 공통 쏠림 + 그 지역만의 쏠림) × (2−j)/2 × 진폭 7%p. j = 묶음 번호(0이 먼저). 후보끼리도 합 0
+  _cntBatchDev(key, r, ids){
+    const h=t=>{ let x=2166136261; const q=String(t); for(let i=0;i<q.length;i++){ x^=q.charCodeAt(i); x=Math.imul(x,16777619); } return ((x>>>0)%100000)/100000; };
+    const g=t=>(h(t+'a')+h(t+'b')+h(t+'c')-1.5)*2;   // 대략 정규(−3~3)
+    const lean=new Map(ids.map(id=>[id, 0.75*g(key+'|'+id)+0.75*g(key+'|'+r+'|'+id)]));
+    let m=0; lean.forEach(v=>m+=v); m/=Math.max(1,ids.length); lean.forEach((v,id)=>lean.set(id, v-m));
+    return (j,id)=> (lean.get(id)||0)*(2-j)/2*7;
+  }
+  presCountPopular(pr, frac, sims, bat){
     const R=VR;
     sims=sims||160;
-    const C=(pr.mode==='runoff'? pr.finalists : (pr.first||[]).slice(0,5)).filter(c=>c.id!=null);
+    // 1차는 후보 다섯 + '기타'(나머지 후보 합) — 다섯만으로 100을 맞추면 1위가 과반처럼 부풀어 보였다(과반이라더니 결선이 열렸다)
+    const RO=pr.mode==='runoff';
+    let C=(RO? pr.finalists : (pr.first||[]).slice(0,5)).filter(c=>c.id!=null);
     if(!C.length || !pr.rShare) return null;
-    const tot=C.reduce((a,c)=>a+(pr.mode==='runoff'? c.votes : c.v),0)||1;
-    const fin=new Map(C.map(c=>[c.id, (pr.mode==='runoff'? c.votes : c.v)/tot*100]));
-    const RS=new Map(pr.rShare.map(([r,n,rows])=>[r,{n, m:new Map(rows)}]));
+    if(!RO){ const all=(pr.first||[]).reduce((a,c)=>a+(+c.v||0),0), top=C.reduce((a,c)=>a+(+c.v||0),0);
+      if(all-top>0.3) C=C.concat([{id:-99, name:'기타', color:'#6b7280', v:all-top}]); }
+    const tot=C.reduce((a,c)=>a+(RO? c.votes : c.v),0)||1;
+    const fin=new Map(C.map(c=>[c.id, (RO? c.votes : c.v)/tot*100]));
+    const RS0=(RO && pr.rShare2 && pr.rShare2.length)? pr.rShare2 : pr.rShare;
+    const RS=new Map(RS0.map(([r,n,rows])=>{ const m=new Map(rows);
+      if(!RO && C.some(c=>c.id===-99)){ let t=0; C.forEach(c=>{ if(c.id!==-99) t+=m.get(c.id)||0; }); m.set(-99, Math.max(0.5, 100-t)); }
+      return [r,{n, m}]; }));
     let W=0; const nat=new Map();
     RS.forEach(x=>{ W+=x.n; C.forEach(c=>nat.set(c.id,(nat.get(c.id)||0)+(x.m.get(c.id)||0)*x.n)); });
     const k=new Map(); C.forEach(c=>{ const nv=(nat.get(c.id)||0)/Math.max(1,W); k.set(c.id, nv>0? fin.get(c.id)/nv : 0); });
@@ -16491,8 +16544,14 @@ class Sim {
     for(let it=0; it<25; it++){ build(); const nn=new Map(); RS.forEach((x,r)=>{ const m=rep.get(r); C.forEach(c=>nn.set(c.id,(nn.get(c.id)||0)+(m.get(c.id)||0)*x.n)); });
       let mx=0; C.forEach(c=>{ const nv=(nn.get(c.id)||0)/Math.max(1,W); if(nv>0){ const f=fin.get(c.id)/nv; mx=Math.max(mx,Math.abs(f-1)); k.set(c.id,k.get(c.id)*f); } }); if(mx<1e-4) break; }
     build();
-    let wc=0; const acc=new Map();
-    frac.forEach((q,r)=>{ const x=RS.get(r), m=rep.get(r); if(!x||!m||!q) return; wc+=x.n*q; m.forEach((v,id)=>acc.set(id,(acc.get(id)||0)+v*x.n*q)); });
+    let wc=0; const acc=new Map(), regPart=new Map(), bkey=(pr.winner||'')+'|'+(pr._round||pr.mode)+'|'+(pr.pct||0).toFixed(2);
+    frac.forEach((q,r)=>{ const x=RS.get(r), m0=rep.get(r); if(!x||!m0||!q) return;
+      let m=m0;
+      if(bat && bat.has(r) && q<0.999){ const c=bat.get(r), D=this._cntBatchDev(bkey, r, [...m0.keys()]); m=new Map(); let t=0;
+        m0.forEach((v,id)=>{ let d=0; for(let j=0;j<c;j++) d+=D(j,id); const y=Math.max(0.1, v+d/Math.max(1,c)); m.set(id,y); t+=y; });
+        if(t>0) m.forEach((v,id)=>m.set(id, v/t*100)); }
+      regPart.set(r, m);
+      wc+=x.n*q; m.forEach((v,id)=>acc.set(id,(acc.get(id)||0)+v*x.n*q)); });
     const f=W? wc/W : 0;
     const share=new Map(); C.forEach(c=>share.set(c.id, wc? (acc.get(c.id)||0)/wc : 0));
     const sigma=0.3+6*(1-f); const first=new Map(), maj=new Map();
@@ -16500,7 +16559,7 @@ class Sim {
       share.forEach((v,id)=>{ const x=Math.max(0,v+R.gauss(0,sigma)); d.set(id,x); sum+=x; });
       d.forEach((v,id)=>{ if(v>tv){tv=v;top=id;} if(sum>0 && v/sum>0.5) maj.set(id,(maj.get(id)||0)+1/sims); });
       first.set(top,(first.get(top)||0)+1/sims); }
-    return {f, share, first, maj, sigma, final:fin};
+    return {f, share, first, maj, sigma, final:fin, regPart};
   }
   // 선거인단 — 개표된 주만 보고 남은 주를 추정한다. 지난 대선 대비 스윙을 개표된 주에서 잰다.
   presCountEC(pr, y, countedRegs, sims){
@@ -20053,21 +20112,7 @@ class Sim {
       let r2=[0,0];
       for(const p of this.parties){ const v=votes.get(p.id)||0;
         if(p.id===vr[0].id)r2[0]+=v; else if(p.id===vr[1].id)r2[1]+=v;
-        else {
-          // 결선 재배분: 보통은 이념이 가까운 쪽으로 간다.
-          // 그러나 결선 진출자 중 한쪽이 방역선 대상(반체제)이면
-          // 이념 거리를 무시하고 그 반대편으로 몰린다 — 2002년 프랑스 '공화국 전선'.
-          const T=this.cordonOn&&!this.cordonBroken? (this.cordonTargets||new Set()) : new Set();
-          const t0=T.has(vr[0].id), t1=T.has(vr[1].id);
-          if(t0!==t1){
-            const safe = t0? 1 : 0;
-            const rate = 0.80 + 0.15*(this.cordonStrength??1);   // 거의 전부 이동
-            r2[safe] += v*Math.min(0.97, rate);
-            r2[1-safe] += v*(1-Math.min(0.97, rate))*0.4;
-          } else {
-            r2[this.partyDist(p.cent,vr[0])<=this.partyDist(p.cent,vr[1])?0:1]+=v*0.85;
-          }
-        } }
+        else { const w=this._runoffSplit(p, vr); r2[0]+=v*w[0]; r2[1]+=v*w[1]; } }
       win=vr[r2[0]>=r2[1]?0:1];
       this._presRecTick=this.tick;
       this._presRec={ mode:'runoff', unify:this._presUnify||[], ec:ecRec, finalists:vr.map((p,j)=>({id:p.id,name:p.name,color:p.color,votes:r2[j]})),
@@ -20083,6 +20128,7 @@ class Sim {
       this.pushNews(3,'norm',`<b>대선</b> — ${win.name} 후보 당선 (${topPct.toFixed(0)}%${C.presRunoff?', 1차 과반':' 단순다수'})`);
     }
     if(this._presRec && this._regionShares) this._presRec.rShare=this._regionShares();   // 대선 개표 중계용 지역별 득표
+    if(this._presRec && this._presRec.mode==='runoff' && this._regionRunoffShares) this._presRec.rShare2=this._regionRunoffShares(vr);   // 결선 개표는 결선의 지역 득표로
     // 연임 제한 — 정당이 아니라 '사람' 기준이다.
     // 예전엔 대통령 기록에 사람을 저장하지 않아(president.leader가 늘 비어) 제한이 한 번도 집행되지 않았다.
     // president.terms는 정당의 연속 집권 횟수, personTerms가 그 사람의 재임 횟수다.
@@ -32793,13 +32839,14 @@ Object.assign(UI, {
         <div id="cntProgBar"><div style="width:0%"></div></div>
         <div id="cntSeatBar"></div><div id="cntLegend" class="mut10" style="line-height:1.7"></div>
         <div id="cntNeedle"></div>
+        <div id="cntGfx"></div>
         <div id="cntExit"></div>
         <div id="cntFeed"></div>
         <div id="cntBtns"><button class="btn primary" id="cntSkip">건너뛰기 ▶▶</button><button class="btn" id="cntFast">빠르게 ×3</button><button class="btn mLblTog" type="button">이름</button></div>
       </div></div></div>`;
       document.body.appendChild(pg); }
     // 지난 개표가 남긴 모양을 지운다 — 혼합제 총선의 두 줄 막대(.two)가 대선·비례 개표에 남으면 후보마다 막대가 따로 서 보였다
-    $('#cntSeatBar').classList.remove('two'); $('#cntSeatBar').innerHTML=''; pg.querySelectorAll('.mLblTog').forEach(b=>b.classList.toggle('off', document.body.classList.contains('noMapLbl')));
+    $('#cntSeatBar').classList.remove('two'); $('#cntSeatBar').innerHTML=''; if($('#cntGfx')) $('#cntGfx').innerHTML=''; else { const g=document.createElement('div'); g.id='cntGfx'; $('#cntNeedle').after(g); } pg.querySelectorAll('.mLblTog').forEach(b=>b.classList.toggle('off', document.body.classList.contains('noMapLbl')));
     return pg;
   },
 
@@ -32817,7 +32864,7 @@ Object.assign(UI, {
     const popular=!ec;
     if(popular && !(pr.rShare && pr.rShare.length>1)) return next();
     const pg=this._ensureCountPage(); pg.classList.add('show');
-    const info=id=>{ const p=s.parties.find(q=>q.id===id);
+    const info=id=>{ if(id===-99) return {name:'기타', color:'#6b7280', lr:9}; const p=s.parties.find(q=>q.id===id);
       const c=(pr.first||[]).find(x=>x.id===id)||(pr.finalists||[]).find(x=>x.id===id);
       return {name:(p&&p.name)||(c&&c.name)||'?', color:(p&&p.color)||(c&&c.color)||'#888', cand:c&&c.cand, lr:p? s.lr(p.cent):0}; };
     const rn=r=>(typeof REGION_NAMES!=='undefined' && REGION_NAMES[r])? REGION_NAMES[r] : '제'+(r+1)+'지역';
@@ -32829,7 +32876,8 @@ Object.assign(UI, {
     $('#cntNeedle').innerHTML=''; $('#cntFeed').innerHTML=''; $('#cntSeatBar').innerHTML=''; $('#cntLegend').innerHTML=''; $('#cntExit').innerHTML='';
     // 대선 개표 지도 — 지난 총선 지도가 남지 않게 비우고, 지역(주)마다 1위 후보 정당 색으로 개표율만큼 칠한다
     $('#cntMap').innerHTML=''; $('#countCard').classList.remove('wide');
-    const RSp= popular? new Map(pr.rShare.map(([r,,rows])=>[r,rows])) : new Map((ec.states||[]).map(st=>[st.reg,[[st.win,100]]]));
+    const RSsrc= (pr.mode==='runoff' && pr.rShare2 && pr.rShare2.length)? pr.rShare2 : pr.rShare;   // 결선 개표는 결선의 지역 득표
+    const RSp= popular? new Map(RSsrc.map(([r,,rows])=>[r,rows])) : new Map((ec.states||[]).map(st=>[st.reg,[[st.win,100]]]));
     const paintP=this._cntRegionMap($('#cntMap'), RSp, info, rn, popular? '지역 색 = 그 지역 1위 후보의 정당 · 진하기 = 개표율 · 반짝 = 개표 완료' : '주 색 = 선거인단을 가져간 후보의 정당 · 확정된 주부터');
     if(paintP.ok) $('#countCard').classList.add('wide');
     let timer;
@@ -32885,13 +32933,13 @@ Object.assign(UI, {
       timer=setInterval(step,110); render(null);
     } else {
       // ── 직선: 지역별로 나눠 개표, 후보 득표율이 수렴한다 ──
-      const regs=pr.rShare.map(([r])=>[r, ((REGION_TRAITS[r]||{}).urban??0.5)+VR.gauss(0,0.15)]).sort((a,b)=>a[1]-b[1]).map(x=>x[0]);
+      const regs=RSsrc.map(([r])=>[r, ((REGION_TRAITS[r]||{}).urban??0.5)+VR.gauss(0,0.15)]).sort((a,b)=>a[1]-b[1]).map(x=>x[0]);
       const PARTS=5, rk=new Map(regs.map((r,i)=>[r,i/Math.max(1,regs.length-1)]));
       const order=[]; for(const r of regs) for(let j=0;j<PARTS;j++) order.push([r, rk.get(r)*0.9+j*0.35+Math.random()*0.15]);
       order.sort((a,b)=>a[1]-b[1]);
-      const n=order.length, frac=new Map(); let doneRegs=0;
+      const n=order.length, frac=new Map(), bat=new Map(), regLead=new Map(); let doneRegs=0;
       $('#cntTitle').textContent= pr._round===1? `${y}년 대통령 선거 1차 투표 개표` : pr._round===2? `${y}년 대통령 선거 결선 개표` : `${y}년 대통령 선거 개표 중계`;
-      $('#cntSub').textContent=`${pr._round===1? '1차 투표 · 과반이면 당선, 아니면 상위 2인 결선' : pr.mode==='runoff'? '결선 투표' : '1차 투표 · 단순다수'} · 지역 ${regs.length}곳`;
+      $('#cntSub').textContent=`${pr._round===1? '1차 투표 · 과반이면 당선, 아니면 상위 2인 결선' : pr.mode==='runoff'? '결선 투표' : s.con.presRunoff? '1차 투표 · 과반이면 결선 없이 당선' : '1차 투표 · 단순다수'} · 지역 ${regs.length}곳`;
       const render=(P)=>{
         const final=k>=n, f= final? 1 : (P? P.f : 0);
         $('#cntPct').textContent=(f>=1? 100 : Math.min(99, Math.floor(f*100)))+'%';   // 끝나기 전엔 내림 — 99.6%가 '100%'로 보이지 않게
@@ -32913,18 +32961,30 @@ Object.assign(UI, {
         $('#cntFeed').innerHTML=feed.slice(0,6).join('');
       };
       let lastP=null;
+      const GP=this._gfxInit && this._gfxInit([['_gfxPresFlow','득표 흐름'],['_gfxPresClose','경합 지역'],['_gfxPresReg','지역별 득표']]);
+      const popR=new Map(RSsrc.map(([r,nn])=>[r,nn]));
       const step=()=>{
         if(done) return;
         elapsed+=110*fast;
         const m=Math.min(n, Math.max(k, Math.round(n*this._cntCurve(elapsed/this._CNT_DUR))));
         if(m===k) return;
-        while(k<m){ const [r]=order[k++]; frac.set(r,(frac.get(r)||0)+1/PARTS); paintP(r, frac.get(r));
-          if(frac.get(r)>0.999){ doneRegs++; feed.unshift(`<div class="row">${rn(r)} 개표 완료</div>`); } }
-        const P=s.presCountPopular(pr, frac, 140); if(!P){ finish(); return; } lastP=P;
+        const touched=new Set();
+        while(k<m){ const [r]=order[k++]; frac.set(r,(frac.get(r)||0)+1/PARTS); bat.set(r,(bat.get(r)||0)+1); touched.add(r); }
+        const P=s.presCountPopular(pr, frac, 140, bat); if(!P){ finish(); return; } lastP=P;
+        if(GP){ GP.flow.push({f:P.f, s:new Map(P.share)}); }
+        // 지역 안 선두 — 묶음마다 구성이 달라 개표 도중 바뀐다(다 세면 최종 1위)
+        for(const r of touched){ const M=P.regPart && P.regPart.get(r); if(M) RSp.set(r, [...M.entries()].filter(([id])=>id!==-99).sort((a,b)=>b[1]-a[1]));   // '기타'(나머지 후보 합)는 지역 1위가 될 수 없다
+          const top=(RSp.get(r)||[])[0], prevTop=regLead.get(r);
+          if(top && prevTop!=null && top[0]!==prevTop && frac.get(r)<0.999){ const g=(RSp.get(r)[0][1]-(RSp.get(r)[1]||[0,0])[1]);
+            feed.unshift(`<div class="row">${rn(r)} — ${this.pdot(top[0])}<b>${info(top[0]).name}</b>${s._josa(info(top[0]).name,'이','가')} ${info(prevTop).name}${s._josa(info(prevTop).name,'을','를')} 제쳤다 <span class="mut">개표 ${Math.round(frac.get(r)*100)}% · ${g.toFixed(1)}%p 차</span></div>`); }
+          if(top) regLead.set(r, top[0]);
+          paintP(r, frac.get(r));
+          if(frac.get(r)>0.999){ doneRegs++; feed.unshift(`<div class="row">${rn(r)} 개표 완료 — ${top? `${this.pdot(top[0])}${info(top[0]).name} ${top[1].toFixed(1)}%` : ''}</div>`); } }
         const L=[...P.share.entries()].sort((a,b)=>b[1]-a[1])[0];
         if(L && lead!=null && L[0]!==lead && P.f>0.1) feed.unshift(`<div class="row" style="color:#6fb6ff"><b>▶ 선두 교체</b> — ${info(L[0]).name}${s._josa(info(L[0]).name,'이','가')} 앞섰다</div>`);
         if(L) lead=L[0];
         render(P);
+        if(GP) this._gfxPaint(GP, {info, rn, RS:RSp, frac, pop:popR});
         if(k>=n){ clearInterval(timer);
           if(pr._round===1){ const F=(pr.finalists||[]).map(c=>c.name), top=(pr.first||[])[0];
             feed.unshift(`<div class="row" style="color:var(--am,#f2b35b)"><b>1차 개표 완료</b> — 과반 득표자 없음${top? ` (1위 ${top.name||info(top.id).name} ${(+top.v).toFixed(1)}%)` : ''} → <b>${F.join(' · ')}</b> 결선</div>`);
@@ -33038,6 +33098,13 @@ Object.assign(UI, {
           <b style="width:${fin? 96 : 62}px;text-align:right">${r.lo}~${r.hi}${fin&&fin.has(r.id)? ` <span style="color:${fin.get(r.id)>=r.lo && fin.get(r.id)<=r.hi? '#7fd38a' : '#ff8a7a'}">→${fin.get(r.id)}</span>` : ''}</b></div>`; }).join('')
         + `<div class="mut10" style="margin-top:2px">${fin? '출구조사 범위 → 실제 의석' : '흰 눈금 = 지금까지 개표로 본 예상 의석'}</div>`; };
     $('#cntExit').innerHTML=exitHTML();
+    // 방송 그래픽(56-countgfx.js) — 예상 의석 · 접전지 · 의석 흐름 · 지역 판세 · 뒤집힌 곳
+    const GX=this._gfxInit && this._gfxInit([['_gfxSeats','예상 의석'],['_gfxClose','접전지'],['_gfxFlow','의석 흐름'],['_gfxRegion','지역 판세'],['_gfxFlip','뒤집힌 곳']]);
+    const regTally=new Map(), closeWon=[], rnG=r=>(typeof REGION_NAMES!=='undefined' && REGION_NAMES[r])? REGION_NAMES[r] : '제'+(r+1)+'지역';
+    for(const [d,,reg] of rec.dWin){ if(reg==null) continue; const x=regTally.get(reg)||{tot:0, done:0, w:new Map()}; x.tot++; regTally.set(reg,x); }
+    const regOfD=new Map(rec.dWin.map(([d,,reg])=>[d,reg]));
+    const gfxData=()=>({proj: k>=n? {f:1, meanSeats:new Map(rec.results.map(r=>[r.id,r.seats])), range:new Map(rec.results.map(r=>[r.id,[r.seats,r.seats]])), maj:new Map(rec.results.map(r=>[r.id, r.seats>=need?1:0])), dProb:new Map()} : proj,
+      T, need, info, nmD, rn:rnG, live: k<n? this._gfxLive(order,k,SH,s,rec,8) : [], closeWon, regTally, hasPrev:!!prevW, sims:120, josa:(w,a,b)=>s._josa(w,a,b)});
     const needleSVG=(pr, A, B, wig)=>{
       const R=74, cx=100, cy=86, v=Math.max(0,Math.min(1,pr+wig));
       const a=Math.PI*(1-v), nx=cx+(R-6)*Math.cos(a), ny=cy-(R-6)*Math.sin(a);
@@ -33092,7 +33159,8 @@ Object.assign(UI, {
       $('#cntLegend').innerHTML=top.map(([id,c])=>`${this.pdot(id)}${info(id).name} <b>${c}</b>`).join(' &nbsp; ')
         + (k<n && pTot? ` <span style="opacity:0.6">· 합계 · 비례는 개표된 지역의 득표로 잠정 배분</span>` : '');
       // 바늘 — 0.4초마다 다시 추정, 사이사이엔 불확실성만큼 흔들린다
-      if(tick%4===0 && counted.length){ proj=s.countProjection(rec, counted, 120); }
+      if(tick%4===0 && counted.length){ proj=s.countProjection(rec, counted, 120); if(GX && proj) GX.flow.push({f:proj.f, s:new Map(proj.meanSeats)}); }
+      if(GX && (tick%2===0 || k>=n)) this._gfxPaint(GX, gfxData());
       if(!counted.length){ $('#cntNeedle').innerHTML=`<div class="mut10" style="text-align:center;padding:18px 0">투표 마감 — 개표를 기다리는 중</div>`; }
       else if(proj){
         if(X && tick%4===0) $('#cntExit').innerHTML=exitHTML(proj.meanSeats);
@@ -33132,6 +33200,9 @@ Object.assign(UI, {
         const pw=prevW? prevW.get(d) : null;
         paintedD.add(d); paint(d, pw!=null && pw!==w);
         if(paintPV){ const rg=(rec.dWin.find(x=>x[0]===d)||[])[2]; if(rg!=null){ cntByReg.set(rg,(cntByReg.get(rg)||0)+1); paintPV(rg, cntByReg.get(rg)/(dByReg.get(rg)||1)); } }
+        { const rg=regOfD.get(d), x=rg!=null? regTally.get(rg) : null; if(x){ x.done++; if(mm) for(const id in mm) x.w.set(+id,(x.w.get(+id)||0)+mm[id]); else x.w.set(w,(x.w.get(w)||0)+1); } }
+        if(mg<2) closeWon.push({d, mg});
+        if(GX && pw!=null && pw!==w){ GX.net.set(w,(GX.net.get(w)||0)+1); GX.net.set(pw,(GX.net.get(pw)||0)-1); GX.flips.push({d, from:pw, to:w}); }
         if(pw!=null && pw!==w) push(`<div class="row">${nmD(d)} — ${this.pdot(w)}<b>${info(w).name}</b>, ${info(pw).name}에서 <b>탈환</b>${pc!=null? ` <span class="mut">${pc.toFixed(1)}%</span>`:''}</div>`, 1);
         else if(mg<2) push(`<div class="row">${nmD(d)} <span style="color:#f2b35b">초접전</span> — ${this.pdot(w)}<b>${info(w).name}</b> ${mg.toFixed(1)}%p 차 당선</div>`, 1);
         else if(!prevW && k%Math.max(1,Math.round(n/25))===0) push(`<div class="row">${nmD(d)} — ${this.pdot(w)}<b>${info(w).name}</b> 당선${pc!=null? ` <span class="mut">${pc.toFixed(1)}%</span>`:''}</div>`, 0);
@@ -36257,6 +36328,142 @@ Object.assign(UI, {
   // 한 트랙으로 통일 — 항상 켠다 (유리 질감·둥근 디자인은 뺐다)
   T2.apply(true);
 })();
+
+// ════════ 개표 방송 그래픽 ════════
+// 방송사 개표 화면처럼 몇 초마다 돌아가는 그래픽 판. 탭을 누르면 그 판에 멈추고, 다시 누르면 돈다.
+//   예상 의석 — 남은 선거구를 수백 번 돌린 예측의 평균과 10~90% 범위, 과반선, '과반 확실/유력/경합' 판정
+//   접전지    — 지금 세고 있는 선거구(개표율이 차오르는 중)의 1·2위 격차. 3%p 안이면 경합. 그리고 예측상 아직 승부를 모르는 선거구 수
+//   의석 흐름 — 개표율에 따라 예상 의석이 어떻게 움직였는지(초반 신기루가 보인다)
+//   지역 판세 — 지역마다 지금까지 이긴 선거구를 정당 색 막대로
+//   뒤집힌 곳 — 지난 선거와 다른 당이 이긴 선거구를 정당별 순증감으로
+Object.assign(UI, {
+  _gfxInit(tabs){
+    const box=$('#cntGfx'); if(!box) return null;
+    const G={box, tabs, cur:0, pin:false, t0:performance.now(), flow:[], net:new Map(), flips:[]};
+    box.innerHTML=`<div class="gfxTabs">${tabs.map((t,i)=>`<button class="gfxTab${i?'':' on'}" data-gt="${i}">${t[1]}</button>`).join('')}<span class="gfxPin" title="탭을 누르면 멈춘다">⟳</span></div><div class="gfxBody"></div>`;
+    box.querySelector('.gfxTabs').onclick=e=>{ const b=e.target.closest('[data-gt]'); if(!b) return; const i=+b.dataset.gt;
+      if(G.pin && G.cur===i){ G.pin=false; } else { G.pin=true; G.cur=i; } G.t0=performance.now(); this._gfxPaint(G); };
+    return G;
+  },
+  _gfxPaint(G, data){
+    if(!G) return; if(data) G.data=data; if(!G.data) return;
+    if(!G.pin && performance.now()-G.t0>5200){ G.t0=performance.now(); G.cur=(G.cur+1)%G.tabs.length; }
+    G.box.querySelectorAll('.gfxTab').forEach((b,i)=>b.classList.toggle('on', i===G.cur));
+    const pin=G.box.querySelector('.gfxPin'); if(pin) pin.textContent= G.pin? '⏸' : '⟳';
+    const fn=G.tabs[G.cur][0]; let h=''; try{ h=this[fn](G, G.data)||''; }catch(e){ h=''; }
+    G.box.querySelector('.gfxBody').innerHTML= h || '<div class="mut10" style="padding:10px 0">개표를 기다리는 중</div>';
+  },
+  // ── 예상 의석 ──
+  _gfxSeats(G, D){
+    const P=D.proj; if(!P) return '';
+    const ids=[...P.meanSeats.entries()].filter(([,v])=>v>=0.5).sort((a,b)=>b[1]-a[1]).slice(0,5).map(x=>x[0]);
+    const mx=Math.max(D.T*0.62, ...ids.map(id=>(P.range.get(id)||[0,0])[1]+2));
+    const tag=p=> p>=0.95? ['과반 확실','#7fd38a'] : p>=0.75? ['과반 유력','#c4e17f'] : p>=0.25? ['과반 경합','#f2b35b'] : p>=0.05? ['과반 희박','#ff9b7a'] : null;
+    let h=`<div class="gfxH">방송사 예측 <span class="mut10">개표 ${Math.round(P.f*100)}% · 남은 선거구 모의 ${D.sims}회</span></div>`;
+    for(const id of ids){ const I=D.info(id), m=P.meanSeats.get(id)||0, [lo,hi]=P.range.get(id)||[m,m], t=tag(P.maj.get(id)||0);
+      h+=`<div class="gfxRow"><span class="gfxNm">${this.pdot(id)}${I.name}</span>
+        <div class="gfxBar"><div style="position:absolute;left:${(lo/mx*100).toFixed(1)}%;width:${Math.max(0.8,(hi-lo)/mx*100).toFixed(1)}%;top:2px;bottom:2px;background:${I.color};opacity:0.35;border-radius:2px"></div>
+          <div style="position:absolute;left:0;width:${(m/mx*100).toFixed(1)}%;top:5px;bottom:5px;background:${I.color};border-radius:2px"></div>
+          <div style="position:absolute;left:${(D.need/mx*100).toFixed(1)}%;top:-3px;bottom:-3px;width:1px;background:#fff9"></div></div>
+        <b class="gfxNum">${Math.round(m)}</b><span class="gfxRng">${lo}~${hi}</span>${t? `<span class="gfxTag" style="color:${t[1]}">${t[0]}</span>` : '<span class="gfxTag"></span>'}</div>`; }
+    return h+`<div class="mut10">진한 막대 = 예상 의석 · 옅은 띠 = 80% 범위 · 흰 선 = 과반 ${D.need}석</div>`;
+  },
+  // ── 접전지 ──
+  _gfxClose(G, D){
+    const L=D.live||[]; let h=`<div class="gfxH">접전지 <span class="mut10">지금 세는 선거구</span></div>`;
+    const rows=L.slice().sort((a,b)=>a.gap-b.gap).slice(0,6);
+    if(!rows.length) h+='<div class="mut10">세는 중인 선거구가 없다</div>';
+    for(const x of rows){ const A=D.info(x.a), B=D.info(x.b), st= x.gap<4? ['경합','#f2b35b'] : x.gap<12? ['우세','#8fc6ff'] : ['유력','#7fd38a'];
+      h+=`<div class="gfxRow"><span class="gfxNm" style="width:118px">${D.nmD(x.d)}</span>
+        <div class="gfxBar" style="display:flex;overflow:hidden"><div style="width:${x.va.toFixed(1)}%;background:${A.color}"></div><div style="flex:1"></div><div style="width:${x.vb.toFixed(1)}%;background:${B.color}"></div></div>
+        <span style="width:78px;font-size:10.5px;text-align:right;white-space:nowrap"><b style="color:${A.color}">${x.va.toFixed(1)}</b> : <b style="color:${B.color}">${x.vb.toFixed(1)}</b></span><span class="gfxTag" style="color:${st[1]}">${st[0]}</span><span class="gfxRng">${Math.round(x.pf*100)}%</span></div>`; }
+    const P=D.proj; if(P && P.dProb){ let toss=0; P.dProb.forEach(M=>{ const top=Math.max(...M.values()); if(top<0.7) toss++; });
+      h+=`<div class="mut10" style="margin-top:3px">예측상 아직 승부를 모르는 선거구(1위 확률 70% 미만) <b style="color:#f2b35b">${toss}곳</b>${D.closeWon.length? ` · 초접전 확정 ${D.closeWon.slice(-3).map(c=>`${D.nmD(c.d)}(${c.mg.toFixed(1)}%p)`).join(', ')}` : ''}</div>`; }
+    return h;
+  },
+  // ── 의석 흐름 ──
+  _gfxFlow(G, D){
+    const F=G.flow; if(F.length<2) return '';
+    const ids=[...(D.proj||{meanSeats:new Map()}).meanSeats.entries()].sort((a,b)=>b[1]-a[1]).slice(0,3).map(x=>x[0]);
+    const W=360, H=110, mx=Math.max(D.need*1.25, ...F.flatMap(p=>ids.map(id=>p.s.get(id)||0)));
+    const X=f=>24+f*(W-34), Y=v=>H-14-v/mx*(H-22);
+    let svg=`<svg viewBox="0 0 ${W} ${H}" style="width:100%;display:block"><line x1="24" x2="${W-10}" y1="${Y(D.need).toFixed(1)}" y2="${Y(D.need).toFixed(1)}" stroke="#fff6" stroke-dasharray="3 3"/><text x="2" y="${(Y(D.need)+3).toFixed(1)}" font-size="8" fill="var(--tx3)">과반</text>`;
+    for(const id of ids){ const I=D.info(id); svg+=`<polyline fill="none" stroke="${I.color}" stroke-width="2" points="${F.map(p=>`${X(p.f).toFixed(1)},${Y(p.s.get(id)||0).toFixed(1)}`).join(' ')}"/>`;
+      const l=F[F.length-1]; svg+=`<text x="${(X(l.f)+3).toFixed(1)}" y="${(Y(l.s.get(id)||0)+3).toFixed(1)}" font-size="9" fill="${I.color}">${Math.round(l.s.get(id)||0)}</text>`; }
+    svg+=`<text x="24" y="${H-2}" font-size="8" fill="var(--tx3)">개표 0%</text><text x="${W-40}" y="${H-2}" font-size="8" fill="var(--tx3)">100%</text></svg>`;
+    // 초반 신기루 — 처음 1위와 지금 1위가 다르면
+    const a0=[...F[0].s.entries()].sort((a,b)=>b[1]-a[1])[0], a1=[...F[F.length-1].s.entries()].sort((a,b)=>b[1]-a[1])[0];
+    const mir= a0 && a1 && a0[0]!==a1[0]? `<div class="mut10" style="color:#6fb6ff">초반엔 ${D.info(a0[0]).name}${D.josa(D.info(a0[0]).name,'이','가')} 앞섰다. 먼저 개표된 곳이 한쪽으로 쏠렸던 '신기루'였다</div>` : '';
+    return `<div class="gfxH">예상 의석 흐름 <span class="mut10">개표율에 따라</span></div>${svg}${mir}`;
+  },
+  // ── 지역 판세 ──
+  _gfxRegion(G, D){
+    const T=D.regTally; if(!T || !T.size) return '';
+    const rows=[...T.entries()].sort((a,b)=>b[1].tot-a[1].tot).slice(0,9);
+    let h=`<div class="gfxH">지역 판세 <span class="mut10">확정 의석 · 개표된 선거구 / 전체</span></div>`;
+    for(const [r,x] of rows){ const segs=[...x.w.entries()].sort((a,b)=>b[1]-a[1]);
+      h+=`<div class="gfxRow"><span class="gfxNm" style="width:96px">${D.rn(r)}</span><div class="gfxBar" style="display:flex;overflow:hidden">${segs.map(([id,c])=>`<div title="${D.info(id).name} ${c}" style="width:${(c/x.tot*100).toFixed(1)}%;background:${D.info(id).color}"></div>`).join('')}</div><span class="gfxRng" style="width:52px">${x.done}/${x.tot}</span>
+        <span class="gfxTag">${segs[0]? `${D.info(segs[0][0]).name.slice(0,5)} ${segs[0][1]}` : ''}</span></div>`; }
+    return h;
+  },
+  // ── 뒤집힌 곳 ──
+  _gfxFlip(G, D){
+    if(!D.hasPrev) return '<div class="gfxH">뒤집힌 곳</div><div class="mut10">지난 선거와 선거구가 달라 비교할 수 없다</div>';
+    const N=[...G.net.entries()].filter(([,v])=>v).sort((a,b)=>b[1]-a[1]);
+    let h=`<div class="gfxH">뒤집힌 곳 <span class="mut10">지난 선거와 다른 당이 이긴 선거구 ${G.flips.length}곳</span></div>`;
+    if(!N.length) return h+'<div class="mut10">아직 없다</div>';
+    const mx=Math.max(...N.map(x=>Math.abs(x[1])),1);
+    for(const [id,v] of N.slice(0,6)){ const I=D.info(id);
+      h+=`<div class="gfxRow"><span class="gfxNm">${this.pdot(id)}${I.name}</span><div class="gfxBar" style="background:none"><div style="position:absolute;left:50%;top:0;bottom:0;width:1px;background:#fff4"></div>
+        <div style="position:absolute;${v>0? 'left:50%' : `right:50%`};width:${(Math.abs(v)/mx*50).toFixed(1)}%;top:3px;bottom:3px;background:${I.color}"></div></div><b class="gfxNum" style="color:${v>0?'#7fd38a':'#ff8a7a'}">${v>0?'+':''}${v}</b></div>`; }
+    const last=G.flips.slice(-3).reverse(); if(last.length) h+=`<div class="mut10" style="margin-top:3px">최근: ${last.map(f=>`${D.nmD(f.d)} ${D.info(f.from).name.slice(0,4)}→${D.info(f.to).name.slice(0,4)}`).join(', ')}</div>`;
+    return h;
+  },
+  // 지금 세는 선거구 — 순서상 다음 L곳이 차오르는 중. 부분 개표 득표 = 최종 + 묶음 쏠림 × 남은 몫(다 세면 최종)
+  _gfxLive(order, k, SH, s, rec, L){
+    const out=[], n=order.length, key=rec.y+'|'+(rec.total||0);
+    for(let j=0;j<L && k+j<n;j++){ const d=order[k+j], pf=Math.max(0.03, Math.min(0.97, 1-(j+1)/(L+1))), sh=SH.get(d); if(!sh) continue;
+      const D=s._cntBatchDev? s._cntBatchDev(key, d, [...sh.keys()]) : null; const m=new Map(); let t=0;
+      sh.forEach((v,id)=>{ const dv=D? D(0,id)*(1-pf)*0.9 : 0; const y=Math.max(0.1, v+dv); m.set(id,y); t+=y; });
+      const top=[...m.entries()].map(([id,v])=>[id, v/t*100]).sort((a,b)=>b[1]-a[1]);
+      if(top.length<2) continue; out.push({d, pf, a:top[0][0], b:top[1][0], va:top[0][1], vb:top[1][1], gap:top[0][1]-top[1][1]}); }
+    return out;
+  },
+  // ── 대선 — 득표 흐름 · 경합 지역 · 지역별 득표 ──
+  _gfxPresFlow(G, D){
+    const F=G.flow; if(F.length<2) return '';
+    const ids=[...F[F.length-1].s.entries()].filter(([id])=>id!==-99).sort((a,b)=>b[1]-a[1]).slice(0,3).map(x=>x[0]);
+    const W=360, H=110, vals=F.flatMap(p=>ids.map(id=>p.s.get(id)||0)), mx=Math.max(55, ...vals)+3, mn=Math.max(0, Math.min(...vals)-3);
+    const X=f=>24+f*(W-34), Y=v=>H-14-(v-mn)/(mx-mn)*(H-22);
+    let svg=`<svg viewBox="0 0 ${W} ${H}" style="width:100%;display:block">${50>mn? `<line x1="24" x2="${W-10}" y1="${Y(50).toFixed(1)}" y2="${Y(50).toFixed(1)}" stroke="#fff6" stroke-dasharray="3 3"/><text x="2" y="${(Y(50)+3).toFixed(1)}" font-size="8" fill="var(--tx3)">50%</text>` : ''}`;
+    for(const id of ids){ const I=D.info(id); svg+=`<polyline fill="none" stroke="${I.color}" stroke-width="2" points="${F.map(p=>`${X(p.f).toFixed(1)},${Y(p.s.get(id)||0).toFixed(1)}`).join(' ')}"/>`;
+      const l=F[F.length-1]; svg+=`<text x="${(X(l.f)+3).toFixed(1)}" y="${(Y(l.s.get(id)||0)+3).toFixed(1)}" font-size="9" fill="${I.color}">${(l.s.get(id)||0).toFixed(1)}</text>`; }
+    svg+=`<text x="24" y="${H-2}" font-size="8" fill="var(--tx3)">개표 0%</text><text x="${W-40}" y="${H-2}" font-size="8" fill="var(--tx3)">100%</text></svg>`;
+    const a0=[...F[0].s.entries()].filter(([id])=>id!==-99).sort((a,b)=>b[1]-a[1])[0], a1=[...F[F.length-1].s.entries()].filter(([id])=>id!==-99).sort((a,b)=>b[1]-a[1])[0];
+    const mir= a0 && a1 && a0[0]!==a1[0]? `<div class="mut10" style="color:#6fb6ff">초반 1위 ${D.info(a0[0]).name} → 지금 1위 ${D.info(a1[0]).name}. 먼저 열린 투표함이 한쪽으로 쏠렸다</div>` : '';
+    return `<div class="gfxH">득표율 흐름 <span class="mut10">개표율에 따라</span></div>${svg}${mir}`;
+  },
+  _gfxPresClose(G, D){
+    const rows=[]; D.RS.forEach((L,r)=>{ const q=D.frac.get(r)||0; if(!q || L.length<2) return; rows.push({r, q, a:L[0][0], b:L[1][0], va:L[0][1], vb:L[1][1], gap:L[0][1]-L[1][1]}); });
+    const live=rows.filter(x=>x.q<0.999).sort((a,b)=>a.gap-b.gap).slice(0,6), done=rows.filter(x=>x.q>=0.999 && x.gap<3);
+    let h=`<div class="gfxH">경합 지역 <span class="mut10">개표 중인 지역의 1·2위 격차</span></div>`;
+    if(!live.length) h+='<div class="mut10">개표 중인 지역이 없다</div>';
+    for(const x of live){ const A=D.info(x.a), B=D.info(x.b), st= x.gap<3? ['경합','#f2b35b'] : x.gap<10? ['우세','#8fc6ff'] : ['유력','#7fd38a'];
+      h+=`<div class="gfxRow"><span class="gfxNm" style="width:110px">${D.rn(x.r)}</span><div class="gfxBar" style="display:flex;overflow:hidden"><div style="width:${x.va.toFixed(1)}%;background:${A.color}"></div><div style="flex:1"></div><div style="width:${x.vb.toFixed(1)}%;background:${B.color}"></div></div>
+        <span style="width:78px;font-size:10.5px;text-align:right;white-space:nowrap"><b style="color:${A.color}">${x.va.toFixed(1)}</b> : <b style="color:${B.color}">${x.vb.toFixed(1)}</b></span><span class="gfxTag" style="color:${st[1]}">${st[0]}</span><span class="gfxRng">${Math.round(x.q*100)}%</span></div>`; }
+    if(done.length) h+=`<div class="mut10" style="margin-top:3px">3%p 안에서 끝난 지역: ${done.map(x=>`${D.rn(x.r)} ${D.info(x.a).name.slice(0,4)} +${x.gap.toFixed(1)}`).join(', ')}</div>`;
+    return h;
+  },
+  _gfxPresReg(G, D){
+    const rows=[]; D.RS.forEach((L,r)=>{ const q=D.frac.get(r)||0; if(q && L.length) rows.push({r,q,L}); });
+    rows.sort((a,b)=>(D.pop.get(b.r)||0)-(D.pop.get(a.r)||0));
+    let h=`<div class="gfxH">지역별 득표 <span class="mut10">개표된 만큼</span></div>`;
+    for(const x of rows.slice(0,9)){ const L=x.L.slice(0,3);
+      h+=`<div class="gfxRow"><span class="gfxNm" style="width:96px">${D.rn(x.r)}</span><div class="gfxBar" style="display:flex;overflow:hidden">${L.map(([id,v])=>`<div style="width:${v.toFixed(1)}%;background:${D.info(id).color}" title="${D.info(id).name} ${v.toFixed(1)}%"></div>`).join('')}</div>
+        <span class="gfxTag" style="color:${D.info(L[0][0]).color}">${D.info(L[0][0]).name.slice(0,5)} ${L[0][1].toFixed(0)}</span><span class="gfxRng">${Math.round(x.q*100)}%</span></div>`; }
+    return rows.length? h : '';
+  },
+});
 
 
 // ════════ 모드 — 관전 · 실험 ════════
